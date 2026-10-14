@@ -1,13 +1,13 @@
-<p align="center"><img src="docs/screenshots/icon.png" width="128" alt="碧池观鱼图标"></p>
+<p align="center"><img src="docs/screenshots/icon.png" width="128" alt="摸鱼图标"></p>
 
-<h1 align="center">碧池观鱼</h1>
+<h1 align="center">摸鱼</h1>
 
-<p align="center">一方碧潭作桌面：锦鲤悠游、云影掠过、雨打荷叶，轻点一下就来抢食。<br>
+<p align="center">把池塘放到桌面下面：锦鲤悠游、四季花开、雨打荷叶，轻轻一点就来抢食。<br>
 macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engine 里运行。</p>
 
-<p align="center"><a href="https://github.com/moli-xia/fishwallpaper/releases/latest"><b>⬇ 下载最新版本</b></a></p>
+<p align="center"><a href="https://github.com/RJunYou/fishwallpaper/releases/latest"><b>⬇ 下载最新版本</b></a></p>
 
-![macOS 桌面上的晴日池塘](docs/screenshots/macos-sunny.jpg)
+![摸鱼秋季池塘](docs/screenshots/macos-current.jpg)
 
 | 多云：云影移过，遮住处变暗、移走后阳光和焦散回来 | 雨天：荷叶积水、水珠、雨雾与涟漪 |
 | --- | --- |
@@ -25,14 +25,14 @@ macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engin
 
 ## 下载
 
-在 [Releases](https://github.com/moli-xia/fishwallpaper/releases/latest) 下载对应平台的安装包：
+在 [Releases](https://github.com/RJunYou/fishwallpaper/releases/latest) 下载对应平台的安装包：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| macOS 12+（Apple 芯片与 Intel） | `BichiKoiPond-<版本>-macOS.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
-| Windows 10 / 11 | `BichiKoiPond-<版本>-Windows.zip` | 解压整个文件夹，运行 `BichiPond.exe`；通知区域锦鲤图标控制。若提示“已保护你的电脑”，点“更多信息 → 仍要运行” |
-| Android 7.0+ | `BichiKoiPond-<版本>-Android.apk` | 安装后第一次打开即进入动态壁纸预览，点「设置壁纸」 |
-| 浏览器 / Wallpaper Engine | `BichiKoiPond-<版本>-Web.zip` | 解压后打开 `index.html`，或在 Wallpaper Engine 中导入该文件夹 |
+| macOS 12+（Apple 芯片） | `摸鱼-<版本>.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
+| Windows 10 / 11 | `摸鱼-<版本>.exe` | 双击安装到「程序文件」，自动创建桌面与开始菜单快捷方式，并提供卸载入口 |
+| Android 7.0+ | `摸鱼.apk` | 安装后第一次打开即进入动态壁纸预览，点「设置壁纸」 |
+| 浏览器 / Wallpaper Engine | `MoYu-<版本>-Web.zip` | 解压后打开 `index.html`，或在 Wallpaper Engine 中导入该文件夹 |
 
 iPhone：iOS 不允许第三方应用提供动态壁纸，因此没有 iPhone 版本；可以在 Safari 中打开网页版全屏观赏。
 
@@ -148,7 +148,7 @@ gh auth login              # 首次使用时登录
 ./scripts/build-macos.sh
 ```
 
-生成 `dist/碧池观鱼.app` 和可拖拽安装的 `dist/碧池观鱼-<版本>.dmg`（当前 1.2.3），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
+生成 `dist/摸鱼.app` 和可拖拽安装的 `dist/摸鱼-<版本>.dmg`（当前 1.2.3），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
 
 双击打开后，池塘即铺满每块屏幕的桌面背景层——位于系统壁纸上、桌面图标下，不影响正常使用桌面；多显示器与空间切换均支持。
 
@@ -164,7 +164,7 @@ gh auth login              # 首次使用时登录
 
 所有窗口（每块屏幕的壁纸与交互窗口）实时同步：在任一处改名、添加或放生锦鲤、切换天气与声音设置，其他窗口立即跟随，以最近一次修改为准；进食数量取各窗口中的较大值。右上角控制卡片会自动避让屏幕安全区域，短屏可在卡片内滚动。
 
-自检：`BICHI_SELFTEST=<输出目录> "dist/碧池观鱼.app/Contents/MacOS/BichiPond"` 会自动走一遍菜单操作（打开交互窗口、切换天气、改名同步、暂停与恢复、关闭窗口），逐项输出 PASS / FAIL 与帧率，把各阶段的壁纸截图存入该目录，完成后恢复原设置并退出。
+自检：`BICHI_SELFTEST=<输出目录> "dist/摸鱼.app/Contents/MacOS/BichiPond"` 会自动走一遍菜单操作（打开交互窗口、切换天气、改名同步、暂停与恢复、关闭窗口），逐项输出 PASS / FAIL 与帧率，把各阶段的壁纸截图存入该目录，完成后恢复原设置并退出。
 
 ## Windows 桌面动态壁纸
 
@@ -172,9 +172,9 @@ gh auth login              # 首次使用时登录
 ./scripts/build-windows.sh
 ```
 
-生成 `dist/碧池观鱼-Windows-<版本>.zip`（约 2MB，当前 1.2.1）。需要 .NET SDK 8 或更高版本（可在 macOS / Linux 上构建；本机装在 `~/.dotnet`，或用 `DOTNET` 指定路径）。程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
+生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.1）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
 
-使用：解压整个文件夹，双击 `BichiPond.exe`。池塘铺满每块屏幕的桌面背景，位于桌面图标之下（兼容 Windows 11 24H2 起改变的桌面层结构），不影响正常使用桌面。
+使用：运行安装器，或解压便携版文件夹后双击 `BichiPond.exe`。池塘铺满每块屏幕的桌面背景，位于桌面图标之下（兼容 Windows 11 24H2 起改变的桌面层结构），不影响正常使用桌面。
 
 - 在桌面空白处轻点：锦鲤游过来抢食（程序只“旁听”鼠标，不拦截任何点击）。壁纸上不显示按钮。
 - 通知区域的锦鲤图标（右键）：打开交互窗口（投喂、起名、天气、声音、设置）、切换四季、切换天气与月下观鱼、暂停壁纸动画、重载、开机时启动、退出；双击图标打开交互窗口。交互窗口里的改动即时同步到桌面壁纸。
@@ -190,11 +190,11 @@ gh auth login              # 首次使用时登录
 ./scripts/build-android.sh
 ```
 
-生成 `android/build/碧池观鱼.apk`，并复制到 `dist/碧池观鱼.apk`（约 1.9MB，版本 1.2.1；需 `~/android-build` 下的 JDK 17 与 Android 构建工具，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。需要 Android 7.0（API 24）及以上。
+生成 `android/build/摸鱼.apk`，并复制到 `dist/摸鱼.apk`（约 1.9MB，版本 1.2.1；需 `~/android-build` 下的 JDK 17 与 Android 构建工具，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。需要 Android 7.0（API 24）及以上。
 
 这是**手机桌面的动态壁纸**：池塘就在主屏幕（及系统允许时的锁屏）背景里游动，应用图标和小部件浮在水面上。
 
-- 安装后第一次点开图标，会直接进入系统的动态壁纸预览，点「设置壁纸」即可；以后也可以在应用设置里点「设为壁纸」，或在系统「壁纸」设置里选择动态壁纸「碧池观鱼」。
+- 安装后第一次点开图标，会直接进入系统的动态壁纸预览，点「设置壁纸」即可；以后也可以在应用设置里点「设为壁纸」，或在系统「壁纸」设置里选择动态壁纸「摸鱼」。
 - 轻点桌面空白处投喂，锦鲤聚过来抢食；左右滑动翻页不会投喂。
 - 壁纸上不显示任何按钮；点应用图标（或壁纸预览里的「设置」）打开完整的池塘，可投喂、给锦鲤起名、切换天气与声音。改动会立即同步到桌面壁纸。
 - 桌面被应用挡住或熄屏时完全停止绘制，不耗电；显示时以 60 帧、按屏幕原生分辨率绘制（最高 3 倍像素密度）。设备跟不上时分两级自动降低精度（不低于 1 倍），页面每分钟在日志里记一行帧率与分辨率（`adb logcat | grep "\[pond\]"`）。
