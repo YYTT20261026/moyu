@@ -16,6 +16,14 @@
   const TAU = Math.PI * 2;
   function randomSeed(seed) { let s = seed >>> 0; return () => { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }; }
   function weatherFromCode(code) { if ([71,73,75,77,85,86].includes(code)) return 'snow'; if (code >= 51) return 'rain'; if (code >= 2) return 'cloudy'; return 'sunny'; }
+  const seasonFromMonth = (month, southernHemisphere = false) => {
+    // JS months are 0-based; southern-hemisphere seasons are shifted by half a year.
+    const local = southernHemisphere ? (month + 6) % 12 : month;
+    if (local >= 2 && local <= 4) return 'spring';
+    if (local >= 5 && local <= 7) return 'summer';
+    if (local >= 8 && local <= 10) return 'autumn';
+    return 'winter';
+  };
   const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   // Shoreline traced on the supplied 16:9 painting. Coordinates are normalized so the
@@ -389,7 +397,7 @@
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
-  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);
