@@ -23,5 +23,6 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <EmbeddedResource Include="payload.zip" LogicalName="MoYu.Installer.payload.zip" />
+    <EmbeddedResource Include="..\AppIcon.ico" LogicalName="MoYu.Installer.AppIcon.ico" />
   </ItemGroup>
 </Project>

@@ -50,7 +50,9 @@ internal sealed class InstallerForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = false;
-        Icon = new System.Drawing.Icon(@"..\AppIcon.ico");
+        using Stream? iconStream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream("MoYu.Installer.AppIcon.ico");
+        if (iconStream != null) Icon = new System.Drawing.Icon(iconStream);
 
         Controls.Add(pathBox);
         Controls.Add(browseButton);

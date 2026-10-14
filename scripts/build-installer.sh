@@ -8,9 +8,13 @@ VERSION="1.2.1"
 INSTALLER_PROJECT="$ROOT/native/windows/installer"
 PAYLOAD="$INSTALLER_PROJECT/payload.zip"
 OUTPUT="$ROOT/dist/摸鱼-$VERSION.exe"
+INSTALLER_INTERMEDIATE="$INSTALLER_PROJECT/bin"
 
 echo "▸ Building Windows application package..."
 DOTNET="$DOTNET" "$ROOT/scripts/build-windows.sh"
+
+echo "▸ Cleaning old installer output that would pollute the net48 assembly search path..."
+rm -rf "$INSTALLER_INTERMEDIATE" "$INSTALLER_PROJECT/obj"
 
 echo "▸ Embedding application package into installer..."
 cp "$ROOT/dist/摸鱼-Windows-$VERSION.zip" "$PAYLOAD"
