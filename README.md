@@ -12,16 +12,8 @@ macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engin
 | 多云：云影移过，遮住处变暗、移走后阳光和焦散回来 | 雨天：荷叶积水、水珠、雨雾与涟漪 |
 | --- | --- |
 | ![多云](docs/screenshots/macos-cloudy.jpg) | ![下雨](docs/screenshots/macos-rain.jpg) |
-| ![雨中荷叶特写](docs/screenshots/rain-lotus.jpg) | ![鱼影](docs/screenshots/fish-shadows.jpg) |
-| 雨中荷叶：叶心积起的一汪雨水、珠状水滴 | 晴天：鱼和乌龟在池底投下青绿色的影子 |
 
-| 七种锦鲤花色与青鲢（逐片鳞片、圆钝的头部） | 池边石头上的小螃蟹 |
-| --- | --- |
-| ![锦鲤花色](docs/screenshots/koi-varieties.jpg) | ![小螃蟹](docs/screenshots/crabs.jpg) |
-
-| 安卓桌面：轻点空白处投喂 | 安卓桌面：雨天 | 设为动态壁纸 | 应用内天气面板 |
-| --- | --- | --- | --- |
-| ![安卓投喂](docs/screenshots/android-home-feeding.jpg) | ![安卓雨天](docs/screenshots/android-home-rain.jpg) | ![壁纸预览](docs/screenshots/android-wallpaper-preview.jpg) | ![天气面板](docs/screenshots/android-weather-panel.jpg) |
+当前版本内置七种锦鲤花色与青鲢，并有小螃蟹、乌龟、蝴蝶与蜻蜓等池塘住客；可在「我的锦鲤」和「设置」中体验。
 
 ## 下载
 
