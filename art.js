@@ -140,7 +140,6 @@
               c0 = mix(c0, sumiC[0], sumi); c1 = mix(c1, sumiC[1], sumi); c2 = mix(c2, sumiC[2], sumi);
             }
             // Each scale carries its own slight tone, which is how scales read from a distance.
-            // Each scale carries its own slight tone, which is how scales read from a distance.
             if (onScale) { const tone = 1 + (hash(SC.id + seed) - .5) * (metal ? .1 : red || dark ? .09 : silver ? .1 : .05) * scaleZone; c0 *= tone; c1 *= tone; c2 *= tone; }
             const mot = silver ? mix(mottle, 1, smooth(.55, .85, Math.abs(v))) : mottle;
             c0 *= mot; c1 *= mot; c2 *= mot;
@@ -151,49 +150,55 @@
               const line = smooth(.84, .98, SC.r) * back * scaleZone, margin = smooth(.5, .78, SC.r) * (1 - smooth(.84, .95, SC.r)) * back * scaleZone;
               const inRed = patterned ? hi : red ? 1 : 0, inBlack = dark ? 1 : patterned ? sumi : 0;
               let pd, ld, mg, tint;
-              if (metal) { pd = .16; ld = .1; mg = .15; tint = [255, 226, 150]; }
-              else if (silver) { const b = 1 - smooth(.55, .85, Math.abs(v)) * .8; pd = .12 * b; ld = .12 * b; mg = .2; tint = [236, 246, 248]; }
-              else if (inBlack > .5) { pd = .22; ld = -.28; mg = .24; tint = [120, 130, 128]; }  // karasu: pale net over black pockets
-              else if (inRed > .5) { pd = .16; ld = .16; mg = .14; tint = [240, 120, 76]; }
-              else { pd = .05; ld = .11; mg = .1; tint = [255, 253, 246]; }                        // white skin: a faint grey net
+              if (metal) { pd = .11; ld = .075; mg = .085; tint = [249, 216, 137]; }
+              else if (silver) { const b = 1 - smooth(.55, .85, Math.abs(v)) * .8; pd = .085 * b; ld = .08 * b; mg = .12; tint = [228, 241, 238]; }
+              else if (inBlack > .5) { pd = .14; ld = -.2; mg = .15; tint = [109, 128, 121]; }
+              else if (inRed > .5) { pd = .12; ld = .12; mg = .08; tint = [233, 109, 65]; }
+              else { pd = .04; ld = .07; mg = .055; tint = [251, 248, 230]; }
               const k = 1 - pocket * pd - line * ld;
               c0 = mix(c0 * k, tint[0], margin * mg); c1 = mix(c1 * k, tint[1], margin * mg); c2 = mix(c2 * k, tint[2], margin * mg);
             }
             // Dorsal fin folded along the back: a dark spine line with a faint translucent membrane beside it.
-            const along = smooth(-23, -17, x) * smooth(10, 5, x), core = smooth(.6, .1, ay) * along * .2, mem = smooth(1.7, .6, ay) * along * (.6 + .4 * Math.sin(x * 3.4)) * .1;
+            const along = smooth(-23, -17, x) * smooth(10, 5, x), core = smooth(.6, .1, ay) * along * .14, mem = smooth(1.7, .6, ay) * along * (.6 + .4 * Math.sin(x * 3.4)) * .07;
             c0 = mix(mix(c0, finC[0], mem), c0 * .62, core); c1 = mix(mix(c1, finC[1], mem), c1 * .64, core); c2 = mix(mix(c2, finC[2], mem), c2 * .66, core);
             albedo.data[j] = c0 * g; albedo.data[j + 1] = c1 * g; albedo.data[j + 2] = c2 * g; albedo.data[j + 3] = cov * 255;
-            let sh = (metal ? .64 + .36 * Math.pow(nz, .55) : .64 + .36 * Math.pow(nz, .6)) * (1 - .24 * smooth(.72, 1, Math.abs(v)));
+            let sh = (.72 + .28 * Math.pow(nz, .6)) * (1 - .18 * smooth(.72, 1, Math.abs(v)));
             if (silver) sh = .88 + .12 * nz;
-            let sp = metal ? .04 * Math.pow(nz, 3) + .05 * Math.pow(nz, 12) : (dark ? .035 : .07) * Math.pow(nz, 6);
+            // A broad satin sheen sits slightly off the spine instead of a white strip down the back.
+            const sheen = Math.exp(-(((v + .2) / .42) ** 2));
+            let sp = metal ? .018 * Math.pow(nz, 3) + .03 * sheen : (dark ? .018 : .03) * sheen;
             if (onScale) {
               // The light-catching band inside each free edge, stronger on the metallic and silver fish;
               // now and then a single scale is turned just so and flashes.
               const back = smooth(.1, -.5, SC.dx), band = smooth(.5, .76, SC.r) * (1 - smooth(.82, .92, SC.r)) * back * scaleZone;
               const flash = hash(SC.id * 3.1 + seed) > (metal || silver ? .9 : .96) ? (1 - SC.r) * scaleZone : 0;
-              if (metal) sp += band * .09 + flash * .07;
-              else if (silver) sp += band * .08 + flash * .09;
-              else if (dark) sp += band * .03 + flash * .02;
-              else sp += band * .045 + flash * .025;
+              if (metal) sp += band * .05 + flash * .04;
+              else if (silver) sp += band * .045 + flash * .055;
+              else if (dark) sp += band * .02 + flash * .015;
+              else sp += band * .025 + flash * .015;
             }
-            sp += smooth(17, 25, x) * Math.pow(nz, 4) * (metal ? .045 : dark ? .025 : .045);
+            sp += smooth(17, 25, x) * sheen * (metal ? .025 : dark ? .015 : .02);
             shade[i] = sh; spec[i] = sp;
           }
         }
         // Tail fin: forked, translucent, fine rays fanning from the peduncle.
         const tailRoot = silver ? -32 : -23;
         if (x < tailRoot && x > -57.5) {
-          const tailU = clamp01(((silver ? -34 : -26) - x) / (silver ? 22 : 26));
-          const span = (silver ? 1.7 : 3.2) + (silver ? 8 : 9.4) * Math.pow(tailU, .85), wob = (grain(x * .5, y * .5) - .5) * (silver ? .45 : 1.2);
-          const endX = (silver ? -43 : -47) - (silver ? 13 : 9) * Math.pow(Math.min(1, ay / (silver ? 9.3 : 11.5)), 1.6) + wob, edge = Math.min(span - ay, x - endX, tailRoot - x);
+          const tailU = clamp01((tailRoot - x) / (silver ? 24 : 33));
+          const span = (silver ? 1.7 : 2.9) + (silver ? 8 : 9.6) * Math.pow(Math.sin(tailU * Math.PI / 2), 1.05);
+          const lobe = ay / (silver ? 9.5 : 12.5), wob = (grain(x * .35, y * .35) - .5) * .35;
+          // Rounded lobes and a deep fork keep the tail light, with all tips inside the existing sprite bounds.
+          const endX = (silver ? -43 : -44.6) - (silver ? 13 : 12) * smooth(.04, .8, lobe) + 3.1 * smooth(.85, 1, lobe) + wob;
+          const edge = Math.min(span - ay, x - endX, tailRoot - x);
           if (edge > -.6) {
-            const th = Math.atan2(y, -(x - tailRoot + 1)), ray = Math.pow(.5 + .5 * Math.cos(th * 26), 6), fold = .5 + .5 * Math.sin(th * 9 + grain(x * .2, 3) * 4);
-            const a = clamp01((edge + .6) / 1.4) * (mix(.8, .34, silver ? tailU : clamp01((-27 - x) / 26)) + ray * .16 - fold * .1);
+            const th = Math.atan2(y, -(x - tailRoot + 1)), ray = Math.pow(.5 + .5 * Math.cos(th * 43 + tailU * .5), 12), fold = .5 + .5 * Math.sin(th * 10 + tailU * 2);
+            const rim = (1 - smooth(.2, 1.2, edge)) * smooth(.25, .6, tailU);
+            const a = clamp01((edge + .6) / 1.2) * (mix(.74, .32, tailU) + ray * .095 + rim * .1 - fold * .045);
             const base2 = clamp01(1 - ((silver ? -34 : -26) - x) / 7), pedHi = ped[0] > 0 ? 1 : 0, pedSumi = ped[1] > 0;
             let f0 = finC[0], f1 = finC[1], f2 = finC[2];
             f0 = mix(f0, mix(base[0], hiC[0], pedHi), base2 * .8); f1 = mix(f1, mix(base[1], hiC[1], pedHi), base2 * .8); f2 = mix(f2, mix(base[2], hiC[2], pedHi), base2 * .8);
             if (pedSumi) { f0 = mix(f0, sumiC[0], base2 * .7); f1 = mix(f1, sumiC[1], base2 * .7); f2 = mix(f2, sumiC[2], base2 * .7); }
-            const lift = ray * (metal ? 26 : 22);
+            const lift = ray * (metal ? 18 : 13) + rim * 6;
             fin.data[j] = Math.min(255, f0 + lift); fin.data[j + 1] = Math.min(255, f1 + lift); fin.data[j + 2] = Math.min(255, f2 + lift * (metal ? .6 : 1)); fin.data[j + 3] = clamp01(a) * 255;
           }
         }
@@ -231,26 +236,34 @@
     ctx.save(); ctx.scale(ppu, ppu); ctx.translate(-BODY.left, BODY.half);
     const dark = L.kind === 'karasu', ink = dark ? 'rgba(200,210,205,' : 'rgba(40,52,46,';
     ctx.globalCompositeOperation = 'source-atop';
-    const hg = ctx.createRadialGradient(27, 0, 0, 27, 0, 7); hg.addColorStop(0, 'rgba(255,255,250,.16)'); hg.addColorStop(1, 'rgba(255,255,250,0)');
+    const hg = ctx.createRadialGradient(25.5, -1.7, .5, 25.5, -1.7, 8); hg.addColorStop(0, 'rgba(255,247,221,.1)'); hg.addColorStop(1, 'rgba(255,247,221,0)');
     ctx.fillStyle = hg; ctx.fillRect(18, -9, 18, 18);
     ctx.lineCap = 'round';
     for (const s of [-1, 1]) {
       const w1 = halfWidth(18.6, L.girth, L.kind), w2 = halfWidth(16.2, L.girth, L.kind);
       ctx.beginPath(); ctx.moveTo(18.8, s * w1 * .42); ctx.quadraticCurveTo(18.2, s * w1 * .85, 16.2, s * w2 * .99);
-      ctx.strokeStyle = ink + '.16)'; ctx.lineWidth = .55; ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(30.6, s * 2.1, .55, .4, 0, 0, TAU); ctx.fillStyle = ink + '.34)'; ctx.fill();
+      ctx.strokeStyle = ink + '.2)'; ctx.lineWidth = .45; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(19.5, s * w1 * .48); ctx.quadraticCurveTo(18.9, s * w1 * .86, 17, s * w2 * .95);
+      ctx.strokeStyle = 'rgba(245,229,192,.2)'; ctx.lineWidth = .3; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(30.4, s * 2, .42, .26, s * .2, 0, TAU); ctx.fillStyle = ink + '.3)'; ctx.fill();
     }
+    ctx.beginPath(); ctx.moveTo(33, -1.8); ctx.quadraticCurveTo(32.4, 0, 33, 1.8);
+    ctx.strokeStyle = ink + '.32)'; ctx.lineWidth = .38; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(33.5, -1.2); ctx.quadraticCurveTo(33.1, 0, 33.5, 1.2);
+    ctx.strokeStyle = 'rgba(246,222,187,.36)'; ctx.lineWidth = .32; ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
     for (const s of [-1, 1]) {
       if (L.kind !== 'silvercarp') {
-      ctx.beginPath(); ctx.moveTo(32.6, s * 1.9); ctx.quadraticCurveTo(34, s * 2.3, 34.7, s * 3.5);
-      ctx.strokeStyle = dark ? 'rgba(60,70,66,.55)' : 'rgba(214,196,168,.55)'; ctx.lineWidth = .38; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(32.5, s * 1.9); ctx.quadraticCurveTo(33.8, s * 2.4, 34.5, s * 3.1);
+      ctx.strokeStyle = dark ? 'rgba(135,153,137,.45)' : 'rgba(210,189,148,.65)'; ctx.lineWidth = .3; ctx.stroke();
       }
       const ex = L.kind === 'silvercarp' ? 23.8 : 25.8, ey = s * (halfWidth(ex, L.girth, L.kind) - 1.25);
-      const ring = ctx.createRadialGradient(ex, ey, .15, ex, ey, 1.45);
-      ring.addColorStop(0, '#0f1413'); ring.addColorStop(.5, '#1a201e'); ring.addColorStop(.62, L.kind === 'ogon' ? '#d9bf78' : dark ? '#6d7262' : '#b8aa7e'); ring.addColorStop(.85, 'rgba(120,110,90,.35)'); ring.addColorStop(1, 'rgba(120,110,90,0)');
-      ctx.beginPath(); ctx.arc(ex, ey, 1.45, 0, TAU); ctx.fillStyle = ring; ctx.fill();
-      ctx.beginPath(); ctx.arc(ex + .3, ey - .22, .26, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fill();
+      const ring = ctx.createRadialGradient(ex + .2, ey - .1, .05, ex, ey, 1.28);
+      ring.addColorStop(0, '#182523'); ring.addColorStop(.46, '#101c1a'); ring.addColorStop(.6, L.kind === 'ogon' ? '#cead61' : dark ? '#8b9c7c' : '#b8a36a'); ring.addColorStop(.8, '#6c7457'); ring.addColorStop(1, 'rgba(51,65,50,.12)');
+      ctx.beginPath(); ctx.ellipse(ex, ey, 1.28, .97, s * .2, 0, TAU); ctx.fillStyle = ring; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(ex - 1.25, ey - s * .15); ctx.quadraticCurveTo(ex, ey - s * 1.1, ex + 1.2, ey - s * .1);
+      ctx.strokeStyle = ink + '.32)'; ctx.lineWidth = .25; ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex + .28, ey - .25, .23, 0, TAU); ctx.fillStyle = 'rgba(255,250,226,.85)'; ctx.fill();
     }
     ctx.restore();
     return c;
@@ -259,31 +272,31 @@
   function finSprite(ppu = 4, motoguro = false) {
     const c = canvas(21 * ppu, 14 * ppu), ctx = c.getContext('2d');
     ctx.scale(ppu, ppu); ctx.translate(1, 7);
-    const path = new Path2D(); path.moveTo(0, -1.7); path.bezierCurveTo(5, -4, 12, -6.3, 15.8, -4.3); path.bezierCurveTo(18.2, -2.4, 18, 3, 15.2, 4.7); path.bezierCurveTo(10.6, 6.6, 4.6, 4.4, 0, 1.7); path.closePath();
-    const g = ctx.createLinearGradient(0, 0, 18, 0); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.6, 'rgba(255,255,255,.68)'); g.addColorStop(1, 'rgba(255,255,255,.42)');
+    const path = new Path2D(); path.moveTo(0, -1.4); path.bezierCurveTo(5, -3.9, 13.3, -6.2, 17.9, -3.9); path.bezierCurveTo(19.8, -2.8, 18.3, 1, 15, 3.9); path.bezierCurveTo(11.4, 6.4, 5.2, 3.3, 0, 1.4); path.closePath();
+    const g = ctx.createLinearGradient(0, 0, 19, 0); g.addColorStop(0, 'rgba(255,255,255,.83)'); g.addColorStop(.5, 'rgba(255,255,255,.52)'); g.addColorStop(1, 'rgba(255,255,255,.23)');
     ctx.fillStyle = g; ctx.fill(path);
     ctx.save(); ctx.clip(path);
     if (motoguro) { const m = ctx.createLinearGradient(0, 0, 11, 0); m.addColorStop(0, 'rgba(24,32,31,.95)'); m.addColorStop(.55, 'rgba(24,32,31,.8)'); m.addColorStop(1, 'rgba(24,32,31,0)'); ctx.fillStyle = m; ctx.fillRect(0, -8, 12, 16); }
     ctx.globalCompositeOperation = 'destination-out';
-    for (let k = 0; k < 11; k++) { const a = -.5 + k * .1 + .05; ctx.beginPath(); ctx.moveTo(.5, 0); ctx.lineTo(Math.cos(a) * 19, Math.sin(a) * 19); ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = .7; ctx.stroke(); }
+    for (let k = 0; k < 11; k++) { const a = -.42 + k * .084 + .042; ctx.beginPath(); ctx.moveTo(.5, 0); ctx.quadraticCurveTo(9, Math.sin(a) * 6, Math.cos(a) * 20, Math.sin(a) * 15); ctx.strokeStyle = 'rgba(0,0,0,.13)'; ctx.lineWidth = .45; ctx.stroke(); }
     ctx.globalCompositeOperation = 'source-over';
-    for (let k = 0; k < 12; k++) { const a = -.5 + k * .1; ctx.beginPath(); ctx.moveTo(.5, 0); ctx.lineTo(Math.cos(a) * 19, Math.sin(a) * 19); ctx.strokeStyle = motoguro && k % 2 ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.5)'; ctx.lineWidth = .28; ctx.stroke(); }
+    for (let k = 0; k < 12; k++) { const a = -.42 + k * .084; ctx.beginPath(); ctx.moveTo(.5, 0); ctx.quadraticCurveTo(9, Math.sin(a) * 6, Math.cos(a) * 20, Math.sin(a) * 15); ctx.strokeStyle = motoguro && k % 2 ? 'rgba(255,255,255,.19)' : 'rgba(255,255,255,.26)'; ctx.lineWidth = .2; ctx.stroke(); }
     ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = .35; ctx.stroke(path);
+    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = .3; ctx.stroke(path);
     return { canvas: c, ppu, px: 1 / 21, py: .5 };
   }
 
   // ---------- Turtle ----------
   const TURTLES = [
-    { shell: '#56663a', light: '#7d8a4c', seam: '#2c341f', line: '#cdbb66', skin: '#546238', stripe: '#d3c97a', ear: '#c0482e', plastron: '#c9b56a' },
-    { shell: '#4f4a33', light: '#75694a', seam: '#2a261a', line: '#9f9460', skin: '#56594a', stripe: '#b9b98a', ear: null, plastron: '#b39c62' }
+    { shell: '#527459', light: '#a2b379', seam: '#344b39', line: '#d5c487', skin: '#708963', stripe: '#e2d6a0', ear: '#c96146', plastron: '#c9b56a' },
+    { shell: '#6d6850', light: '#ada276', seam: '#484935', line: '#d4c79d', skin: '#80866b', stripe: '#ded8b1', ear: null, plastron: '#b39c62' }
   ];
   function shellSprite(v, ppu) {
     const T = TURTLES[v], W = 50, H = 42, c = canvas(W * ppu, H * ppu), ctx = c.getContext('2d');
     const img = ctx.createImageData(c.width, c.height), d = img.data, n = valueNoise(v * 31 + 5);
     const base = hex(T.shell), light = hex(T.light), seam = hex(T.seam), line = hex(T.line);
-    const centers = [[14.5, 0], [7.2, 0], [0, 0], [-7.2, 0], [-14.2, 0]];
-    for (const x of [10.5, 3.5, -3.5, -10.5]) { centers.push([x, 10.8], [x, -10.8]); }
+    const centers = [[14.8, 0], [7.4, 0], [0, 0], [-7.8, 0], [-14.6, 0]];
+    for (const [x, y] of [[11.7, 10.2], [4.2, 11], [-4.4, 11.2], [-11.7, 10.4]]) { centers.push([x, y], [x, -y]); }
     for (let py = 0; py < c.height; py++) for (let px = 0; px < c.width; px++) {
       const x = (px + .5) / ppu - W / 2, y = (py + .5) / ppu - H / 2, rx = 22 * (1 + (x < 0 ? .02 : 0)), ry = 17.6 * (1 + (x < 0 ? -x / rx * .07 : 0));
       const th = Math.atan2(y / ry, x / rx), serr = Math.abs(Math.cos(th)) > .5 && x < 0 ? .35 * Math.abs(Math.sin(th * 12)) : 0;
@@ -292,23 +305,28 @@
       const cov = clamp01((edge + .5) * ppu * .6), j = (py * c.width + px) * 4;
       let d1 = 1e9, d2 = 1e9, ci = 0;
       for (let k = 0; k < centers.length; k++) { const dx = (x - centers[k][0]) * 1.05, dy = y - centers[k][1], dd = Math.hypot(dx, dy); if (dd < d1) { d2 = d1; d1 = dd; ci = k; } else if (dd < d2) d2 = dd; }
-      const marginal = rr > .82;
-      let s = marginal ? 1 - smooth(0, .09, Math.abs(Math.sin(th * 12 + .26))) : 1 - smooth(.25, .75, d2 - d1);
-      if (marginal) s = Math.max(s, 1 - smooth(0, .02, Math.abs(rr - .82) * 4));
-      const rings = .5 + .5 * Math.sin((marginal ? (1 - rr) * 70 : (d2 - d1) * 2.2) + n(x * .4, y * .4) * 2);
-      const center = marginal ? .4 : clamp01(1 - (d2 - d1) / 6);
-      let c0 = mix(base[0], light[0], center * .8), c1 = mix(base[1], light[1], center * .8), c2 = mix(base[2], light[2], center * .8);
-      const mot = fbm(n, x * .18, y * .18, 3);
-      c0 *= .86 + mot * .26 + rings * .06; c1 *= .86 + mot * .26 + rings * .06; c2 *= .86 + mot * .2 + rings * .05;
-      // Yellow radiating marks on the costal scutes; bars on the rim.
+      const marginal = rr > .85, gap = d2 - d1;
+      let s = marginal ? 1 - smooth(.018, .085, Math.abs(Math.sin(th * 12 + .26))) : 1 - smooth(.16, .62, gap);
+      if (marginal) s = Math.max(s, 1 - smooth(.004, .025, Math.abs(rr - .85)));
+      // Domed scutes catch light at their centres; irregular, fine growth rings sit under the pigment.
+      const ringPhase = (marginal ? (1 - rr) * 76 : d1 * 3.25) + n(x * .24, y * .24) * 1.1;
+      const rings = Math.pow(.5 + .5 * Math.cos(ringPhase), 10), center = marginal ? .4 : smooth(.3, 5.6, gap);
+      const scuteTone = .92 + hash(ci * 21 + v * 31) * .14;
+      let c0 = mix(base[0], light[0], center * .58) * scuteTone, c1 = mix(base[1], light[1], center * .58) * scuteTone, c2 = mix(base[2], light[2], center * .58) * scuteTone;
+      const mot = fbm(n, x * .12, y * .12, 3), grain = n(x * 2.1, y * 2.1);
+      const tone = .94 + mot * .12 + (grain - .5) * .035 - rings * .05;
+      c0 *= tone; c1 *= tone; c2 *= tone;
+      // Warm, restrained markings on the side scutes and individual plates around the rim.
       const ang = Math.atan2(y - centers[ci][1], x - centers[ci][0]);
-      const mark = !marginal && ci >= 5 ? smooth(.8, .95, Math.sin(ang * 3 + d1 * .55 + ci)) * smooth(1.5, 3.5, d1) * .75 : marginal ? smooth(.6, .9, Math.sin(th * 24 + 1.5)) * .5 : 0;
-      c0 = mix(c0, line[0], mark * .55); c1 = mix(c1, line[1], mark * .55); c2 = mix(c2, line[2], mark * .5);
-      c0 = mix(c0, seam[0], s * .85); c1 = mix(c1, seam[1], s * .85); c2 = mix(c2, seam[2], s * .85);
+      const mark = !marginal && ci >= 5 ? smooth(.84, .99, Math.sin(ang * 3 + d1 * .4 + ci)) * smooth(1.5, 3.5, d1) * .32 : marginal ? smooth(.4, .9, Math.sin(th * 24 + 1.5)) * .24 : 0;
+      const bevel = !marginal ? smooth(.45, .8, gap) * (1 - smooth(.8, 1.4, gap)) * (y < centers[ci][1] ? .17 : .07) : (1 - smooth(0, .04, Math.abs(rr - .96))) * .25;
+      const warm = mark + bevel + rings * (marginal ? .025 : .045);
+      c0 = mix(c0, line[0], warm); c1 = mix(c1, line[1], warm); c2 = mix(c2, line[2], warm);
+      c0 = mix(c0, seam[0], s * .68); c1 = mix(c1, seam[1], s * .68); c2 = mix(c2, seam[2], s * .68);
       const nz = Math.sqrt(Math.max(0, 1 - Math.min(1, rr * .96) ** 2)), keel = v === 1 ? smooth(1.2, 0, Math.abs(y)) * .12 + smooth(1.1, 0, Math.abs(Math.abs(y) - 9.5)) * .08 : 0;
-      const lit = (.5 + .5 * Math.pow(nz, .6)) * (1 - .3 * smooth(.9, 1.02, rr)) + keel;
-      const gloss = Math.pow(nz, 14) * .16 + smooth(.55, .9, fbm(n, x * .5 + 9, y * .5, 2)) * .05;
-      d[j] = Math.min(255, c0 * lit + gloss * 255); d[j + 1] = Math.min(255, c1 * lit + gloss * 255); d[j + 2] = Math.min(255, c2 * lit + gloss * 240); d[j + 3] = cov * 255;
+      const lit = (.75 + .25 * Math.pow(nz, .7) - y / ry * .055 - x / rx * .025) * (1 - .18 * smooth(.92, 1.02, rr)) + keel * .5;
+      const gloss = Math.exp(-(((x + 4) / 14) ** 2 + ((y + 4) / 10) ** 2)) * .035;
+      d[j] = Math.min(255, c0 * lit + gloss * 236); d[j + 1] = Math.min(255, c1 * lit + gloss * 240); d[j + 2] = Math.min(255, c2 * lit + gloss * 206); d[j + 3] = cov * 255;
     }
     ctx.putImageData(img, 0, 0);
     return { canvas: c, ppu, px: .5, py: .5 };
@@ -316,33 +334,46 @@
   function skinPaint(ctx, T, path, len, stripes) {
     ctx.fillStyle = T.skin; ctx.fill(path);
     ctx.save(); ctx.clip(path);
-    for (let k = 0; k < stripes.length; k++) { ctx.beginPath(); ctx.moveTo(-2, stripes[k]); ctx.bezierCurveTo(len * .3, stripes[k] * 1.15, len * .7, stripes[k] * .75, len + 1, stripes[k] * .35); ctx.strokeStyle = T.stripe; ctx.globalAlpha = .5; ctx.lineWidth = .4; ctx.stroke(); }
+    for (let k = 0; k < stripes.length; k++) { ctx.beginPath(); ctx.moveTo(-2, stripes[k]); ctx.bezierCurveTo(len * .3, stripes[k] * 1.1, len * .7, stripes[k] * .88, len + 1, stripes[k] * .55); ctx.strokeStyle = T.stripe; ctx.globalAlpha = .48; ctx.lineWidth = k % 2 ? .27 : .4; ctx.stroke(); }
     ctx.globalAlpha = 1;
-    const g = ctx.createLinearGradient(0, -6, 0, 6); g.addColorStop(0, 'rgba(0,0,0,.25)'); g.addColorStop(.45, 'rgba(255,255,230,.12)'); g.addColorStop(1, 'rgba(0,0,0,.3)');
+    // Small, irregular skin scales remain subtle at pond size.
+    ctx.fillStyle = 'rgba(32,56,36,.11)';
+    for (let x = 2; x < len; x += 1.4) for (let y = -4; y <= 4; y += 1.3) { ctx.beginPath(); ctx.ellipse(x + hash(x * 7 + y) * .45, y, .24, .18, 0, 0, TAU); ctx.fill(); }
+    const g = ctx.createLinearGradient(0, -6, 0, 6); g.addColorStop(0, 'rgba(30,47,29,.16)'); g.addColorStop(.35, 'rgba(247,239,201,.14)'); g.addColorStop(1, 'rgba(30,47,29,.24)');
     ctx.fillStyle = g; ctx.fillRect(-3, -8, len + 6, 16);
     ctx.restore();
-    ctx.strokeStyle = 'rgba(20,26,16,.35)'; ctx.lineWidth = .3; ctx.stroke(path);
+    ctx.strokeStyle = 'rgba(33,53,34,.3)'; ctx.lineWidth = .28; ctx.stroke(path);
   }
   function turtleSprites(v, ppu = 4) {
     const T = TURTLES[v], parts = { shell: shellSprite(v, ppu) };
     // Head with neck, pivot at the neck root, snout toward +x.
     let c = canvas(19 * ppu, 12 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu); ctx.translate(1, 6); ctx.scale(1.12, 1.12);
-    let p = new Path2D(); p.moveTo(0, -2.6); p.bezierCurveTo(3, -2.9, 6, -4.3, 9.6, -4); p.bezierCurveTo(13, -3.6, 15.2, -1.7, 15.7, 0); p.bezierCurveTo(15.2, 1.7, 13, 3.6, 9.6, 4); p.bezierCurveTo(6, 4.3, 3, 2.9, 0, 2.6); p.closePath();
-    skinPaint(ctx, T, p, 16, [-2.3, -.8, .8, 2.3]);
+    let p = new Path2D(); p.moveTo(0, -2.35); p.bezierCurveTo(3, -2.6, 5.3, -4.1, 9, -4.1); p.bezierCurveTo(12.2, -4.2, 14.9, -2.8, 15.5, -1.25); p.bezierCurveTo(16.1, -.5, 16.1, .5, 15.5, 1.25); p.bezierCurveTo(14.9, 2.8, 12.2, 4.2, 9, 4.1); p.bezierCurveTo(5.3, 4.1, 3, 2.6, 0, 2.35); p.closePath();
+    skinPaint(ctx, T, p, 16, [-3, -1.45, 0, 1.45, 3]);
+    ctx.lineCap = 'round';
     for (const s of [-1, 1]) {
-      if (T.ear) { ctx.beginPath(); ctx.ellipse(8.2, s * 3.1, 1.9, .7, s * .15, 0, TAU); ctx.fillStyle = T.ear; ctx.globalAlpha = .85; ctx.fill(); ctx.globalAlpha = 1; }
-      ctx.beginPath(); ctx.arc(11.6, s * 2.6, 1.05, 0, TAU); ctx.fillStyle = '#d6c56d'; ctx.fill();
-      ctx.beginPath(); ctx.arc(11.7, s * 2.62, .66, 0, TAU); ctx.fillStyle = '#141712'; ctx.fill();
-      ctx.beginPath(); ctx.arc(11.9, s * 2.62 - .25, .2, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
-      ctx.beginPath(); ctx.arc(15, s * .55, .22, 0, TAU); ctx.fillStyle = 'rgba(20,24,16,.6)'; ctx.fill();
+      if (T.ear) { ctx.beginPath(); ctx.ellipse(7.9, s * 3.1, 2.1, .6, s * .1, 0, TAU); ctx.fillStyle = T.ear; ctx.globalAlpha = .9; ctx.fill(); ctx.globalAlpha = 1; }
+      const ex = 11.8, ey = s * 2.6, eye = ctx.createRadialGradient(ex + .2, ey - .2, .05, ex, ey, 1.05);
+      eye.addColorStop(0, '#233c2c'); eye.addColorStop(.55, '#12291e'); eye.addColorStop(.66, '#c3b36a'); eye.addColorStop(1, '#8c9961');
+      ctx.beginPath(); ctx.ellipse(ex, ey, 1.1, .9, s * .18, 0, TAU); ctx.fillStyle = eye; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(ex - 1.1, ey - s * .08); ctx.quadraticCurveTo(ex, ey - s * 1.15, ex + 1, ey - s * .1); ctx.strokeStyle = '#456045'; ctx.lineWidth = .3; ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex + .25, ey - .25, .23, 0, TAU); ctx.fillStyle = 'rgba(255,253,232,.92)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(15.1, s * .6, .18, 0, TAU); ctx.fillStyle = 'rgba(34,53,32,.5)'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(15.1, s * 1.5); ctx.quadraticCurveTo(13.8, s * 2.2, 13.3, s * 1.8); ctx.strokeStyle = 'rgba(45,62,36,.34)'; ctx.lineWidth = .24; ctx.stroke();
     }
     parts.head = { canvas: c, ppu, px: 1 / 19, py: .5 };
     // Legs point along +x from the shoulder pivot; claws at the tip.
     const leg = (len, wide, claws) => {
       const c2 = canvas((len + 3) * ppu, (wide + 5) * ppu), x2 = c2.getContext('2d'); x2.scale(ppu, ppu); x2.translate(1, (wide + 5) / 2);
-      const q = new Path2D(); q.moveTo(0, -3.4); q.bezierCurveTo(len * .3, -3.5, len * .45, -2.9, len * .58, -2.9); q.bezierCurveTo(len * .75, -wide * .55, len + .4, -wide * .48, len + .6, 0); q.bezierCurveTo(len + .4, wide * .48, len * .75, wide * .55, len * .58, 2.9); q.bezierCurveTo(len * .45, 2.9, len * .3, 3.5, 0, 3.4); q.closePath();
-      skinPaint(x2, T, q, len, [-1.3, 1.3]);
-      for (let k = 0; k < claws; k++) { const yy = (k - (claws - 1) / 2) * (wide * .78 / claws); x2.beginPath(); x2.moveTo(len * .9, yy); x2.lineTo(len + 1.3, yy * 1.15); x2.strokeStyle = 'rgba(226,216,180,.8)'; x2.lineWidth = .32; x2.lineCap = 'round'; x2.stroke(); }
+      const q = new Path2D(); q.moveTo(0, -2.7); q.bezierCurveTo(len * .3, -3.4, len * .44, -2.1, len * .58, -2.7); q.bezierCurveTo(len * .7, -wide * .55, len * .89, -wide * .58, len + .25, -wide * .31);
+      // A scalloped webbed paddle instead of a cylindrical leg.
+      for (let k = 0; k < claws; k++) { const a = -Math.PI / 2 + k / (claws - 1) * Math.PI, b = a + Math.PI / (claws - 1) * .5; q.quadraticCurveTo(len + .45 + Math.cos(a) * .65, Math.sin(a) * wide * .4, len - .05 + Math.cos(b) * .65, Math.sin(b) * wide * .34); }
+      q.bezierCurveTo(len * .85, wide * .58, len * .7, wide * .55, len * .58, 2.7); q.bezierCurveTo(len * .44, 2.1, len * .3, 3.4, 0, 2.7); q.closePath();
+      skinPaint(x2, T, q, len, [-1.4, 1.4]);
+      x2.lineCap = 'round';
+      for (let k = 0; k < claws; k++) { const yy = (k - (claws - 1) / 2) * (wide * .68 / claws), tip = len + .55 - Math.abs(yy) * .12;
+        x2.beginPath(); x2.moveTo(len * .65, yy * .3); x2.quadraticCurveTo(len * .85, yy * .8, tip, yy); x2.strokeStyle = 'rgba(43,65,38,.22)'; x2.lineWidth = .25; x2.stroke();
+        x2.beginPath(); x2.moveTo(tip - .15, yy); x2.quadraticCurveTo(tip + .45, yy * 1.05, tip + .8, yy * 1.08); x2.strokeStyle = 'rgba(237,225,186,.85)'; x2.lineWidth = .26; x2.stroke(); }
       return { canvas: c2, ppu, px: 1 / (len + 3), py: .5 };
     };
     parts.front = leg(11, 8.2, 5); parts.back = leg(9, 8.6, 4);
@@ -524,13 +555,204 @@
     ctx.fillStyle = s; ctx.fillRect(0, -5, 19, 10); ctx.restore();
     return { canvas: c, ppu, px: .5, py: .5 };
   }
+  // Lotus plants are painted once and shared by every season, like the other pond sprites.
+  // Sparse translucent beads are part of the cached painting, so they ride its
+  // leaf mesh and receive the same daylight, cloud shade and night colour.
+  function lotusDew(ctx, cx, cy, rx, ry, dry = false, petals = false) {
+    const beads = petals ? [[-.29,-.11,.034],[.26,.15,.025]] : [[-.32,-.25,.062],[.34,.18,.052],[-.10,.43,.028],[.10,-.40,.023]];
+    ctx.save(); ctx.globalCompositeOperation = 'source-atop'; ctx.globalAlpha = dry ? .5 : .9;
+    for (const [dx, dy, size] of dry ? beads.slice(0, 2) : beads) {
+      const x = cx + dx * rx, y = cy + dy * ry, r = size * rx, h = r * .85;
+      // Contact shade and a clear green centre keep the bead from reading as a white dot.
+      ctx.fillStyle = 'rgba(6,37,34,.27)'; ctx.beginPath(); ctx.ellipse(x + r * .18, y + h * .35, r * 1.07, h, 0, 0, TAU); ctx.fill();
+      const glass = ctx.createRadialGradient(x - r * .28, y - h * .30, r * .08, x, y, r);
+      glass.addColorStop(0, 'rgba(231,250,228,.60)'); glass.addColorStop(.35, 'rgba(156,213,186,.24)'); glass.addColorStop(.72, 'rgba(34,97,77,.16)'); glass.addColorStop(1, 'rgba(183,231,211,.52)');
+      ctx.fillStyle = glass; ctx.beginPath(); ctx.ellipse(x, y, r, h, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(220,244,220,.55)'; ctx.lineWidth = Math.max(.4, r * .12);
+      ctx.beginPath(); ctx.ellipse(x, y, r * .82, h * .82, 0, .10, Math.PI * .68); ctx.stroke();
+      ctx.fillStyle = 'rgba(250,255,238,.88)'; ctx.beginPath(); ctx.ellipse(x - r * .28, y - h * .35, r * .24, h * .17, -.45, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function lotusLeafSprite(age = 'green', ppu = 2) {
+    const c = canvas(96 * ppu, 80 * ppu), ctx = c.getContext('2d');
+    ctx.scale(ppu, ppu); ctx.translate(48, 40);
+    const dry = age === 'dry', yellow = age === 'yellow', rnd = randomSeed(dry ? 143 : yellow ? 97 : 41);
+    const path = new Path2D();
+    for (let i = 0; i <= 100; i++) {
+      const a = .15 + i / 100 * (TAU - .38), r = 39 * (1 + Math.sin(a * 11) * .035 + Math.sin(a * 5 + 1) * .03);
+      const x = Math.cos(a) * r, y = Math.sin(a) * r * (dry ? .54 : .8);
+      if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
+    }
+    path.lineTo(34, 0); path.closePath();
+    const g = ctx.createRadialGradient(-10, -11, 2, 3, 4, 43);
+    const colors = dry ? ['#ba985b', '#80613b', '#493d2e'] : yellow ? ['#d6bd60', '#9b9b47', '#566c37'] : ['#a5bd6c', '#608d53', '#2d604b'];
+    colors.forEach((color, i) => g.addColorStop(i / 2, color));
+    ctx.fillStyle = g; ctx.fill(path); ctx.strokeStyle = dry ? '#65503a' : '#3f6745'; ctx.lineWidth = .8; ctx.stroke(path);
+    ctx.save(); ctx.clip(path);
+    ctx.lineWidth = .45; ctx.strokeStyle = dry ? 'rgba(224,190,127,.07)' : 'rgba(225,230,146,.06)';
+    for (let i = 0; i < 18; i++) {
+      const a = i / 18 * TAU, x = Math.cos(a) * 42, y = Math.sin(a) * (dry ? 25 : 34);
+      ctx.beginPath(); ctx.moveTo(2, 2); ctx.quadraticCurveTo(x * .55 + 2, y * .4 + 2, x, y); ctx.stroke();
+      for (let j = 1; j <= 3; j++) {
+        const q = j / 4; ctx.beginPath(); ctx.moveTo(x * q, y * q); ctx.lineTo(x * q - Math.sin(a) * 6, y * q + Math.cos(a) * 4); ctx.stroke();
+      }
+    }
+    for (let i = 0; i < 700; i++) {
+      ctx.fillStyle = rnd() < .5 ? 'rgba(234,223,154,.06)' : 'rgba(27,58,37,.07)';
+      ctx.fillRect(rnd() * 90 - 45, rnd() * 70 - 35, .5 + rnd() * 1.5, .4 + rnd());
+    }
+    if (dry) {
+      ctx.strokeStyle = 'rgba(58,43,29,.55)'; ctx.lineWidth = 1.4;
+      for (const a of [.9, 2.5, 3.8, 5.3]) { ctx.beginPath(); ctx.moveTo(Math.cos(a) * 34, Math.sin(a) * 20); ctx.lineTo(Math.cos(a) * 17, Math.sin(a) * 11); ctx.stroke(); }
+    }
+    ctx.restore();
+    ctx.fillStyle = dry ? '#6c5234' : '#b9c778'; ctx.beginPath(); ctx.ellipse(2, 2, 2.3, 1.8, 0, 0, TAU); ctx.fill();
+    lotusDew(ctx, 2, 2, 39, dry ? 23 : 31, dry);
+    return { canvas: c, ppu, px: .5, py: .5 };
+  }
+  function lotusFlowerSprite(bud = false, ppu = 2) {
+    const c = canvas(84 * ppu, 84 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu); ctx.translate(42, 42);
+    const petal = (angle, length, width, inner) => {
+      ctx.save(); ctx.rotate(angle);
+      const p = new Path2D(); p.moveTo(0, 5); p.bezierCurveTo(-width, -length * .2, -width * .5, -length * .8, 0, -length); p.bezierCurveTo(width * .5, -length * .8, width, -length * .2, 0, 5);
+      const g = ctx.createLinearGradient(0, 3, 0, -length); g.addColorStop(0, '#e9ce9f'); g.addColorStop(.35, inner ? '#fff1df' : '#f2d6ce'); g.addColorStop(.8, '#eba2b1'); g.addColorStop(1, '#bd627f');
+      ctx.fillStyle = g; ctx.fill(p); ctx.strokeStyle = 'rgba(153,74,100,.11)'; ctx.lineWidth = .5; ctx.stroke(p);
+      ctx.strokeStyle = 'rgba(255,241,226,.10)'; ctx.lineWidth = .3;
+      for (const offset of [-.3, 0, .3]) { ctx.beginPath(); ctx.moveTo(0, 1); ctx.quadraticCurveTo(width * offset, -length * .45, 0, -length * .9); ctx.stroke(); }
+      ctx.restore();
+    };
+    if (bud) {
+      ctx.strokeStyle = '#5b7950'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(0, 30); ctx.quadraticCurveTo(4, 16, 0, 2); ctx.stroke();
+      petal(-.18, 23, 10, false); petal(.13, 26, 9, true);
+    } else {
+      for (let i = 0; i < 11; i++) petal(i / 11 * TAU, 35 + Math.sin(i * 2) * 2, 13, false);
+      for (let i = 0; i < 8; i++) petal((i + .35) / 8 * TAU, 25, 11, true);
+      for (let i = 0; i < 6; i++) petal((i + .1) / 6 * TAU, 15, 7, true);
+      ctx.fillStyle = '#ddaf55'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.fill();
+      for (let i = 0; i < 15; i++) { const a = i / 15 * TAU; ctx.fillStyle = '#f6de87'; ctx.beginPath(); ctx.arc(Math.cos(a) * 6, Math.sin(a) * 6, 1.1, 0, TAU); ctx.fill(); }
+      lotusDew(ctx, 0, 0, 35, 35, false, true);
+    }
+    return { canvas: c, ppu, px: .5, py: .5 };
+  }
+  function lotusPodSprite(dry = false, ppu = 2) {
+    const c = canvas(60 * ppu, 86 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu);
+    const rnd = randomSeed(dry ? 263 : 167), noise = valueNoise(dry ? 61 : 53);
+    ctx.strokeStyle = dry ? '#66583f' : '#355747'; ctx.lineWidth = 2.8; ctx.beginPath(); ctx.moveTo(25, 79); ctx.bezierCurveTo(32, 61, 26, 52, 29, 33); ctx.stroke();
+    ctx.strokeStyle = dry ? '#b19d75' : '#8d9f61'; ctx.lineWidth = .8; ctx.stroke();
+    const g = ctx.createLinearGradient(13, 13, 44, 38); g.addColorStop(0, dry ? '#a69167' : '#859a58'); g.addColorStop(.5, dry ? '#776344' : '#5d753f'); g.addColorStop(1, dry ? '#40392d' : '#294e3d'); ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(10, 22); ctx.lineTo(22, 42); ctx.quadraticCurveTo(30, 46, 38, 41); ctx.lineTo(50, 22); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = dry ? 'rgba(184,156,98,.26)' : 'rgba(142,161,80,.25)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.moveTo(12 + i * 5, 23); ctx.quadraticCurveTo(22 + i * 2, 34, 25 + i * 1.5, 41); ctx.stroke(); }
+    const cap = new Path2D();
+    for (let i = 0; i <= 64; i++) { const a = i / 64 * TAU, r = 1 + Math.sin(a * 9 + 1) * .025 + Math.cos(a * 5) * .03, x = 30 + Math.cos(a) * 21 * r, y = 21 + Math.sin(a) * 12.5 * r; i ? cap.lineTo(x, y) : cap.moveTo(x, y); } cap.closePath();
+    const light = ctx.createLinearGradient(11, 10, 46, 33); light.addColorStop(0, dry ? '#c6ae7b' : '#b2b676'); light.addColorStop(.5, dry ? '#927d54' : '#819552'); light.addColorStop(1, dry ? '#5c523b' : '#486740');
+    ctx.fillStyle = light; ctx.fill(cap);
+    ctx.save(); ctx.clip(cap);
+    for (let i = 0; i < 190; i++) {
+      const x = 8 + rnd() * 44, y = 7 + rnd() * 29, v = noise(x * .32, y * .38);
+      ctx.strokeStyle = v > .5 ? 'rgba(205,197,131,.17)' : 'rgba(36,58,40,.23)'; ctx.lineWidth = .4 + rnd() * 1.2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 1 + rnd() * 2, y - .5 - rnd()); ctx.stroke();
+    }
+    for (const [x,y] of [[20,19],[29,14],[40,18],[18,25],[30,24],[40,27]]) {
+      const hollow = ctx.createRadialGradient(x - .4, y + .5, .2, x, y, 3.6); hollow.addColorStop(0, dry ? '#2e2d25' : '#253e30'); hollow.addColorStop(.65, dry ? '#594d32' : '#47613b'); hollow.addColorStop(1, dry ? '#a39161' : '#92a25c');
+      ctx.fillStyle = hollow; ctx.beginPath(); ctx.ellipse(x, y, 3.2, 2.7, -.2, 0, TAU); ctx.fill();
+      ctx.strokeStyle = dry ? 'rgba(218,193,137,.5)' : 'rgba(202,207,133,.5)'; ctx.lineWidth = .55; ctx.beginPath(); ctx.ellipse(x, y, 3, 2.5, -.2, Math.PI, TAU); ctx.stroke();
+    }
+    ctx.restore();
+    if (dry) { ctx.strokeStyle = 'rgba(239,241,228,.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(30, 19, 20, 12, -.08, Math.PI, TAU); ctx.stroke(); }
+    return { canvas: c, ppu, px: .5, py: .72 };
+  }
+  function lotusStemSprite(ppu = 2) {
+    const c = canvas(68 * ppu, 94 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu);
+    ctx.strokeStyle = '#8e7755'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(22, 86); ctx.bezierCurveTo(20, 57, 34, 40, 29, 18); ctx.lineTo(42, 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(45, 87); ctx.quadraticCurveTo(39, 58, 51, 34); ctx.lineTo(43, 28); ctx.stroke();
+    ctx.strokeStyle = 'rgba(226,216,186,.65)'; ctx.lineWidth = .65; ctx.beginPath(); ctx.moveTo(21, 84); ctx.quadraticCurveTo(24, 49, 29, 24); ctx.stroke();
+    return { canvas: c, ppu, px: .5, py: .86 };
+  }
+  // Keep the original painting's silhouettes, but repaint their photographic texture
+  // in broken colour planes and radial brush marks to match the new illustrated pond.
+  // This work happens once, before the shared atlas is uploaded.
+  function paintLotusCutout(c, leaf, age) {
+    const ctx = c.getContext('2d'), W = c.width, H = c.height, original = ctx.getImageData(0, 0, W, H);
+    const soft = canvas(W, H), sc = soft.getContext('2d');
+    sc.filter = 'blur(3px)'; sc.drawImage(c, 0, 0);
+    const blurred = sc.getImageData(0, 0, W, H).data, data = original.data, noise = valueNoise(47 + age * 29);
+    const tones = age === 2 ? [[40, 44, 39], [99, 83, 57], [166, 141, 86]] : age === 1 ? [[34, 62, 50], [119, 121, 57], [189, 166, 89]] : [[13, 48, 46], [31, 86, 73], [111, 162, 91]];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (!data[i + 3]) continue;
+      const nx = (x - W * .49) / (W * .44), ny = (y - H * .52) / (H * .43), a = Math.atan2(ny, nx), r = Math.hypot(nx, ny);
+      const luma = (blurred[i] * .3 + blurred[i + 1] * .59 + blurred[i + 2] * .11) / 255;
+      const brush = Math.floor(noise(x / 11, y / 8) * 6) / 5 - .5;
+      if (leaf) {
+        const fold = Math.cos(a * 13 + r * 2) * .011 + Math.sin(a * 6 - r * 3) * .008;
+        const q = clamp01(.53 - nx * .13 - ny * .18 + fold + brush * .08 + (luma - .4) * .065 - smooth(.83, 1.12, r) * .17);
+        const k = q < .5 ? 0 : 1, t = q < .5 ? q * 2 : q * 2 - 1;
+        for (let ch = 0; ch < 3; ch++) data[i + ch] = mix(tones[k][ch], tones[k + 1][ch], t) + (noise(x / 2.5, y / 3) - .5) * 2;
+      } else {
+        const green = blurred[i + 1] > blurred[i] * 1.06 && y > H * .48;
+        const gold = blurred[i] > blurred[i + 2] * 1.3 && blurred[i + 1] > blurred[i + 2] * 1.18;
+        const colors = green ? [[27, 61, 49], [108, 137, 78]] : gold ? [[145, 111, 52], [230, 204, 113]] : [[115, 65, 87], [246, 220, 212]];
+        const q = clamp01((luma - .21) / .69 + brush * .025 - nx * .045 - ny * .035);
+        for (let ch = 0; ch < 3; ch++) data[i + ch] = mix(mix(colors[0][ch], colors[1][ch], q), blurred[i + ch], gold || green ? .1 : .15) + (noise(x / 3, y / 4) - .5) * 1.5;
+      }
+    }
+    ctx.putImageData(original, 0, 0);
+    if (!leaf) { if (age === 3) lotusDew(ctx, W * .5, H * .5, W * .43, H * .43, false, true); return; }
+    ctx.save(); ctx.globalCompositeOperation = 'source-atop'; ctx.lineCap = 'round';
+    const rnd = randomSeed(93), cx = W * .49, cy = H * .52;
+    for (let j = 0; j < 16; j++) {
+      const a = j / 16 * TAU + .04, ex = Math.cos(a) * W * .44, ey = Math.sin(a) * H * .42;
+      ctx.strokeStyle = age === 2 ? 'rgba(194,173,118,.04)' : 'rgba(192,211,130,.045)'; ctx.lineWidth = .75 + rnd() * .2;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.quadraticCurveTo(cx + ex * .5 - ey * .035, cy + ey * .48 + ex * .025, cx + ex * .94, cy + ey * .94); ctx.stroke();
+      // Short irregular strokes follow the veins rather than speckling the whole leaf.
+      for (let k = 1; k < 6; k++) {
+        const t = k / 7, px = cx + ex * t, py = cy + ey * t, side = k % 2 ? 1 : -1;
+        ctx.strokeStyle = k % 3 ? 'rgba(174,196,118,.02)' : 'rgba(8,46,45,.03)'; ctx.lineWidth = 1.2 + rnd() * 1;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + ex * .07 - ey * side * .09, py + ey * .07 + ex * side * .06); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = age === 2 ? '#99825b' : '#9eae6e'; ctx.beginPath(); ctx.ellipse(cx, cy, 3, 2, -.3, 0, TAU); ctx.fill(); ctx.restore();
+    lotusDew(ctx, cx, cy, W * .44, H * .42, age === 2);
+  }
+  function originalLotusSprites(image) {
+    const sprites = {};
+    for (const [i, name] of ['lotusLeaf','lotusYellowLeaf','lotusDryLeaf','lotusFlower','lotusBud'].entries()) {
+      const w = i < 3 ? 192 : 168, h = i < 3 ? 160 : 168, c = canvas(w, h);
+      c.getContext('2d').drawImage(image, i * 192 + (192 - w) / 2, 0, w, h, 0, 0, w, h);
+      paintLotusCutout(c, i < 3, i);
+      let painted = c, py = i === 4 ? .82 : .5;
+      if (i === 3) {
+        painted = canvas(w, 208); const ctx = painted.getContext('2d');
+        ctx.lineCap = 'round'; ctx.strokeStyle = '#264f43'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(85, 188); ctx.bezierCurveTo(82, 170, 91, 151, 83, 126); ctx.stroke();
+        ctx.strokeStyle = '#839b65'; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.drawImage(c, 0, 0); py = .86;
+      }
+      sprites[name] = { canvas: painted, ppu: 2, px: .5, py };
+    }
+    return sprites;
+  }
+  // Detached flowers and leaves keep the colours and brushwork of the seasonal paintings.
+  function driftingSprites(image, seasons) {
+    const sprites = {};
+    for (const defs of Object.values(seasons)) for (const d of defs) {
+      const c = canvas(d.w, d.h);
+      c.getContext('2d').drawImage(image, d.tx, d.ty, d.w, d.h, 0, 0, d.w, d.h);
+      sprites[d.sprite] = { canvas: c, ppu: 1, px: .5, py: .5 };
+    }
+    return sprites;
+  }
   function miscSprites() {
     const s = { fin: finSprite(4, false), finMoto: finSprite(4, true), pellet: pelletSprite(), dot: dotSprite(), flake: flakeSprite(), streak: streakSprite(), ring: ringSprite(), petal: petalSprite() };
+    Object.assign(s, { lotusLeaf: lotusLeafSprite(), lotusYellowLeaf: lotusLeafSprite('yellow'), lotusDryLeaf: lotusLeafSprite('dry'), lotusFlower: lotusFlowerSprite(), lotusBud: lotusFlowerSprite(true), lotusPod: lotusPodSprite(), lotusDryPod: lotusPodSprite(true), lotusStem: lotusStemSprite() });
     for (let v = 0; v < TURTLES.length; v++) { const t = turtleSprites(v); for (const k in t) s[`turtle${v}_${k}`] = t[k]; }
     for (let b = 0; b < BUTTERFLIES.length; b++) { const t = butterflySprites(b); s[`bf${b}_wing`] = t.wing; s[`bf${b}_body`] = t.body; }
     for (let d = 0; d < DRAGONFLIES.length; d++) { const t = dragonflySprites(d); s[`df${d}_wing`] = t.wing; s[`df${d}_body`] = t.body; }
     for (let v = 0; v < CRABS.length; v++) { const t = crabSprites(v); for (const k in t) s[`crab${v}_${k}`] = t[k]; }
     return s;
   }
-  root.PondArt = { fishSprite, fishLayers, halfWidth, girthOf, miscSprites, valueNoise, TURTLE_COUNT: TURTLES.length, BUTTERFLY_COUNT: BUTTERFLIES.length, DRAGONFLY_COUNT: DRAGONFLIES.length, CRAB_COUNT: CRABS.length };
+  root.PondArt = { fishSprite, fishLayers, halfWidth, girthOf, miscSprites, originalLotusSprites, driftingSprites, valueNoise, TURTLE_COUNT: TURTLES.length, BUTTERFLY_COUNT: BUTTERFLIES.length, DRAGONFLY_COUNT: DRAGONFLIES.length, CRAB_COUNT: CRABS.length };
 })(window);

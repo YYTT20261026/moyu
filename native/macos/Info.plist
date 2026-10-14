@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>碧池观鱼</string>
+	<string>摸鱼</string>
 	<key>CFBundleExecutable</key>
 	<string>BichiPond</string>
 	<key>CFBundleIconFile</key>
@@ -11,13 +11,13 @@
 	<key>CFBundleIdentifier</key>
 	<string>com.bichi.koipond</string>
 	<key>CFBundleName</key>
-	<string>碧池观鱼</string>
+	<string>摸鱼</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2.1</string>
+	<string>1.2.3</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>6</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.lifestyle</string>
 	<key>LSMinimumSystemVersion</key>
@@ -27,7 +27,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>碧池观鱼 · 独立复刻作品</string>
+	<string>摸鱼 · 独立复刻作品</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

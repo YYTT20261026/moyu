@@ -1,30 +1,64 @@
 // Everything alive in the pond besides the simulation: koi drawing, turtles, butterflies, petals, weather.
 (function (root) {
   'use strict';
-  const { PALETTES, fishPalette, BODY, clamp, wrap, fishPose } = root.PondCore;
+  const { PALETTES, fishPalette, BODY, POND_MAPS, PondHabitat, clamp, wrap, fishPose } = root.PondCore;
   const { halfWidth, girthOf } = root.PondArt;
   const TAU = Math.PI * 2;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 
-  // Things above the water in the painted pond (assets/pond.jpg, 1672×941), fitted to the painting's edges:
+  // Things above the water in the supplied painting (assets/pond.jpg, 2560×1440).
   // [x, y, rx, kind, ry, rotation]; l = lotus/pennywort leaf, f = flower or petal, b = lotus bud, r = rock breaking the surface.
-  const FLOATERS = [[1419,10,73,'l'],[1450,120,60,'l',52],[1504,231,55,'l',45],[1609,267,66,'l'],[1645,452,66,'l',64],[1565,147,48,'f',40],[1538,41,17,'b',22],[1579,395,30,'f',26],[1635,351,14,'b',17],[1398,202,14,'f',20,-.3],[1550,503,21,'f',13,.35],
-    [1352,161,18,'l'],[1373,131,16,'l'],[1310,103,15,'l'],[1284,121,14,'l'],[1311,148,13,'l'],[1332,39,14,'l'],[1293,11,10,'l'],[1503,52,15,'l'],[1539,83,28,'l'],[1513,139,13,'l'],[1628,201,22,'l'],[1657,183,13,'l'],[1653,217,17,'l'],[1518,289,15,'l'],[1526,299,14,'l'],[1544,318,14,'l'],[1503,339,17,'l'],[1534,356,15,'l'],[1471,363,19,'l'],[1508,377,18,'l'],[1523,413,18,'l'],[1654,376,17,'l'],[1663,322,12,'l'],[1570,539,15,'l'],[1596,529,14,'l'],[1586,567,12,'l'],
-    [1654,791,17,'l'],[1622,806,13,'l'],[1641,820,13,'l'],[1606,838,25,'l'],[1663,859,15,'l'],[1624,885,22,'l'],[1663,893,15,'l'],[1536,740,59,'r',47],[1639,628,51,'r',55],
-    [36,550,50,'l',54],[175,732,71,'l',65],[11,741,50,'l'],[65,848,81,'l'],[196,921,91,'l'],[267,810,43,'l',40],[67,655,49,'f',42],[139,547,17,'b',20,.5],[71,734,14,'b',17],[201,826,30,'f',27],[355,773,21,'f',13,.3],[52,397,16,'f',11],
-    [67,463,16,'l'],[104,451,17,'l'],[115,483,17,'l'],[78,497,16,'l'],[101,535,17,'l'],[17,480,16,'l'],[98,603,18,'l'],[145,609,19,'l'],[13,629,13,'l'],[129,643,20,'l'],[165,643,16,'l'],[226,654,14,'l'],[256,653,14,'l'],[251,686,14,'l'],[287,680,16,'l'],[313,704,16,'l'],[259,716,14,'l'],[287,719,15,'l'],[343,725,16,'l'],[310,746,17,'l'],
-    [324,892,20,'l'],[357,902,18,'l'],[304,923,17,'l'],[398,888,15,'l'],[393,931,11,'l'],[432,797,14,'l'],[448,826,14,'l'],[59,152,23,'l'],[120,131,17,'l'],[124,166,15,'l'],[102,82,16,'l'],[81,59,17,'l'],[376,80,15,'l'],[224,87,69,'r',56],[432,41,40,'r']];
-  const LOTUS = FLOATERS.filter(f => f[3] === 'f' && f[2] > 25);
+  const FLOATERS = [
+    [110,365,124,'r',122],[981,94,97,'r',91],[1259,106,106,'r',104],
+    [1638,812,92,'r',63],[1008,1041,66,'r',54],
+    [1128,225,34,'f',26],[1409,108,35,'f',39],[1783,577,31,'f',29],
+    [1186,558,14,'f',11],[1734,378,14,'f',10],
+    [1628,572,15,'f',10],[1719,585,14,'f',11],[888,924,13,'f',10]
+  ].map(([x,y,rx,kind,ry=rx])=>[x*1.25,y*1.25,rx*1.25,kind,ry*1.25]);
+  const seasonalFloaters = {
+    spring:FLOATERS,
+    summer:[[100,360,107,'r',122],[983,96,95,'r',105],[1261,107,92,'r',116],[1665,718,115,'r',75],[1056,1135,84,'r',60]],
+    autumn:[[135,338,116,'r',101],[981,107,103,'r',103],[1263,110,94,'r',112],[1562,752,126,'r',74],[1123,1133,74,'r',43]],
+    winter:[[98,318,102,'r',109],[981,105,96,'r',105],[1253,105,92,'r',114],[1596,712,138,'r',102],[1123,1135,93,'r',58]]
+  };
+  for(const season of ['summer','autumn','winter'])seasonalFloaters[season]=seasonalFloaters[season].map(([x,y,rx,kind,ry=rx])=>[x*1.25,y*1.25,rx*1.25,kind,ry*1.25]);
+  // A small lotus patch in the lower-left water, following the plant's annual cycle.
+  // Sprite, offset from the patch, size, rotation. All artwork is cached in the sprite atlas.
+  const LOTUS_PLANTS = {
+    spring: [['lotusLeaf',-52,10,.54,-.4],['lotusLeaf',0,28,.7,.35],['lotusLeaf',45,-9,.46,-.9],['lotusLeaf',-10,-25,.35,.8]],
+    summer: [['lotusLeaf',-65,13,.9,-.4],['lotusLeaf',4,35,1,.35],['lotusLeaf',65,7,.88,-.8],['lotusLeaf',4,-29,.82,.8],['lotusLeaf',-41,-32,.65,-1],['lotusFlower',-13,18,.82,.12],['lotusBud',58,-4,.75,.3]],
+    autumn: [['lotusYellowLeaf',-57,17,.9,-.4],['lotusYellowLeaf',13,33,.88,.35],['lotusDryLeaf',60,4,.7,-.8],['lotusPod',-15,-4,.86,-.14],['lotusPod',47,-19,.64,.25]],
+    winter: [['lotusDryLeaf',-53,25,.7,-.4],['lotusDryLeaf',32,32,.54,.4],['lotusStem',-22,25,.95,-.1],['lotusStem',55,22,.73,.2],['lotusDryPod',-24,7,.74,-.22],['lotusDryPod',35,9,.62,.18]]
+  };
+  // Species already in the atlas: white/yellow/swallowtail butterflies, red/blue dragonflies.
+  const SEASONAL_INSECTS = {
+    spring: { butterflies: [0, 1], dragonflies: [0], fireflies: 0 },
+    summer: { butterflies: [0, 1, 2], dragonflies: [0, 1], fireflies: 14 },
+    autumn: { butterflies: [1], dragonflies: [0], fireflies: 0 },
+    winter: { butterflies: [], dragonflies: [], fireflies: 0 }
+  };
+  function floaterDefinitions(season) {
+    const drifters = root.POND_DRIFTERS?.[season] || [];
+    return (seasonalFloaters[season] || FLOATERS).filter(f => f[3] !== 'f' || f[2] > 25 || !drifters.some(d => Math.hypot(d.ix-f[0],d.iy-f[1]) < Math.max(d.w,d.h)));
+  }
   // Flowers, buds and petals have pointed tips, so their ellipses are grown a little to take the tips in.
   const grow = f => f[3] === 'f' || f[3] === 'b' ? 1.1 : f[3] === 'l' ? 1.02 : 1;
   // Mask in image space: red = above water (no refraction or caustics), green = casts a shadow on the bed,
   // blue = rests on the water and leaves a wet line (flowers on stalks do not).
-  function floatMask(width, height) {
+  function floatMask(width, height, season='spring') {
+    const map=POND_MAPS[season]||POND_MAPS.spring,defs=floaterDefinitions(season);
     const k = .5, c = document.createElement('canvas'); c.width = Math.round(width * k); c.height = Math.round(height * k);
     const ctx = c.getContext('2d');
-    for (const f of FLOATERS) {
+    // The complete dry bank uses the same outline as swimming and feeding.
+    // Preserve its original pixels instead of refracting water over the rocks.
+    const path=points=>{ctx.beginPath();points.forEach(([u,v],i)=>i?ctx.lineTo(u*c.width,v*c.height):ctx.moveTo(u*c.width,v*c.height));ctx.closePath();};
+    ctx.fillStyle='rgb(255,0,0)';ctx.fillRect(0,0,c.width,c.height);
+    ctx.globalCompositeOperation='destination-out';path(map.water);ctx.fill();
+    ctx.globalCompositeOperation='source-over';
+    for(const rock of map.rocks){path(rock);ctx.fill();}
+    for (const f of defs) {
       const [x, y, rx, kind, ry = rx, rot = 0] = f, g = grow(f), stalk = kind === 'b' || (kind === 'f' && rx > 25);
-      ctx.fillStyle = kind === 'r' ? 'rgb(215,0,215)' : stalk ? 'rgb(255,255,0)' : 'rgb(255,255,255)';
+      ctx.fillStyle = kind === 'r' ? 'rgb(255,0,0)' : stalk ? 'rgb(255,255,0)' : 'rgb(255,255,255)';
       ctx.beginPath(); ctx.ellipse(x * k, y * k, rx * g * k, ry * g * k, rot, 0, TAU); ctx.fill();
     }
     return c;
@@ -34,7 +68,7 @@
   // cloudCover: share of the pond under drifting cloud shadow (1 = overcast); cloudShade: how much a cloud's shadow dims.
   // Caustics, glints, fish highlights and crisp shadows belong to sunlit water only; the renderer takes them away under cloud.
   const LOOKS = {
-    sunny: { sunK: 1, bright: 1.02, sat: 1, tint: [1.02, 1, .96], caustic: .26, causticTint: [1, .97, .84], glint: 1, glintColor: [1, .96, .84], sky: [.86, .93, .94], skyK: .025, cloudCover: .14, cloudShade: .3, wave: .6, refract: 14, ripple: 9, shade: .3, shadow: .8, vignette: .5, water: [.34, .47, .4], moon: 0, mist: 0 },
+    sunny: { sunK: 1, bright: 1.02, sat: 1, tint: [1.02, 1, .96], caustic: .26, causticTint: [1, .97, .84], glint: 1, glintColor: [1, .96, .84], sky: [.86, .93, .94], skyK: .025, cloudCover: 0, cloudShade: 0, wave: .6, refract: 14, ripple: 9, shade: .12, shadow: .8, vignette: .32, water: [.34, .47, .4], moon: 0, mist: 0 },
     cloudy: { sunK: .95, bright: .98, sat: .9, tint: [1, 1, 1.01], caustic: .22, causticTint: [1, .97, .88], glint: .8, glintColor: [1, .96, .86], sky: [.82, .87, .88], skyK: .05, cloudCover: .56, cloudShade: .46, wave: .7, refract: 14, ripple: 9, shade: .26, shadow: .78, vignette: .55, water: [.35, .46, .42], moon: 0, mist: 0 },
     rain: { sunK: .4, bright: .76, sat: .66, tint: [.93, .98, 1.04], caustic: .035, causticTint: [.9, .95, 1], glint: .12, glintColor: [.9, .95, 1], sky: [.68, .74, .78], skyK: .13, cloudCover: 1, cloudShade: .08, wave: 1, refract: 15, ripple: 10, shade: .3, shadow: .5, vignette: .65, water: [.3, .39, .38], moon: 0, mist: .1 },
     snow: { sunK: .55, bright: .94, sat: .66, tint: [.99, 1.02, 1.07], caustic: .06, causticTint: [.95, .98, 1], glint: .28, glintColor: [.95, .98, 1], sky: [.9, .93, .96], skyK: .11, cloudCover: .75, cloudShade: .2, wave: .42, refract: 13, ripple: 8, shade: .22, shadow: .5, vignette: .5, water: [.4, .48, .48], moon: 0, mist: .04 }
@@ -56,6 +90,18 @@
   class Turtle {
     constructor(variant, rnd) {
       Object.assign(this, { variant, rnd, x: .25 + rnd() * .5, y: .3 + rnd() * .45, angle: rnd() * TAU, v: 0, turn: 0, stroke: rnd() * TAU, depth: .5, depthGoal: .5, goal: null, goalTime: 0, rest: 2 + rnd() * 4, breath: 20 + rnd() * 30, surfaced: 0, look: 0, lookGoal: 0, neck: 1, size: 1.08 + rnd() * .14, bubble: 0 });
+    }
+    startle(x, y, w, h, radius, habitat) {
+      const px = this.x * w, py = this.y * h;
+      if (Math.hypot(px - x, py - y) > radius) return;
+      let tx = px + (px - x) * 1.8 || px + 1;
+      let ty = py + (py - y) * 1.8 || py + 1;
+      const safe = habitat?.project(tx, ty, 42);
+      if (safe) [tx, ty] = safe;
+      this.goal = [clamp(tx / w, .1, .9), clamp(ty / h, .12, .88)];
+      this.goalTime = 9 + this.rnd() * 5;
+      this.depthGoal = .82; this.surfaced = 0; this.breath = 20 + this.rnd() * 15;
+      this.rest = 1.6;
     }
     update(dt, w, h, scale, scene) {
       const r = this.rnd, s = scale * this.size, L = 60 * s;
@@ -88,6 +134,8 @@
       this.v += Math.max(0, Math.sin(this.stroke)) * (resting ? 0 : L * .5) * dt;
       this.v *= Math.exp(-dt * .9);
       x += Math.cos(this.angle) * this.v * dt; y += Math.sin(this.angle) * this.v * dt;
+      const safe = scene?.sim?.habitat?.project(x, y, L * .42);
+      if (safe) [x, y] = safe;
       this.x = clamp(x / w, .05, .95); this.y = clamp(y / h, .06, .94);
       this.depth += (this.depthGoal - this.depth) * Math.min(1, dt * .45);
       if (r() < dt * .25) this.lookGoal = (r() - .5) * (resting ? 1.1 : .5);
@@ -99,7 +147,7 @@
       const S = R.sprites, v = this.variant, s = scale * this.size * (1 + (.5 - this.depth) * .08), x = this.x * w, y = this.y * h, a = this.angle, c = Math.cos(a), si = Math.sin(a);
       const fogA = .03 + this.depth * .3, fog = [look.water[0], look.water[1], look.water[2], fogA];
       const at = (lx, ly) => [x + (lx * c - ly * si) * s, y + (lx * si + ly * c) * s];
-      const off = (6 + (1 - this.depth) * 26) * scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .86 - (1 - this.depth) * .2], blur = [(1 - this.depth) * 1.1, 0, 0, 0];
+      const off = (6 + (1 - this.depth) * 26) * scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .7 - (1 - this.depth) * .18], blur = [(1 - this.depth) * 1.1, 0, 0, 0];
       const part = (name, lx, ly, ang, flip) => {
         const [px, py] = at(lx, ly);
         R.sprite('under', S[`turtle${v}_${name}`], px, py, a + ang, s, flip ? -s : s, undefined, fog);
@@ -218,32 +266,38 @@
   }
 
   // Where crabs live, in painting px [x, y, rx, ry]: the rocks that break the surface and the mossy banks around them.
-  const CRAB_HOMES = [[224, 87, 58, 46], [432, 41, 32, 30], [1536, 740, 50, 40], [1639, 628, 42, 46], [120, 190, 58, 30], [1560, 830, 80, 40], [1262, 862, 62, 34]];
+  const CRAB_HOMES = [[110,365,78,80],[981,94,65,58],[1259,106,66,68],
+    [1638,812,62,40],[1009,1041,30,24],[1460,982,65,42]]
+    .map(c=>c.map(v=>v*1.25));
   // A small crab: it scuttles sideways about its rock or bank, rests with claws raised, now and then waves one,
   // and bolts for the water and dives when something startles it, coming up again somewhere else a while later.
   class Crab {
     constructor(variant, rnd) {
+      this.homes=CRAB_HOMES;
       Object.assign(this, { variant, rnd, home: 0, u: 0, v: 0, heading: rnd() * TAU, state: 'hidden', timer: 1 + rnd() * 6, walk: 0, speed: 0, target: null, side: 1, alpha: 0, wave: 0, waveT: 0, size: .85 + rnd() * .35, x: 0, y: 0 });
     }
     // Position on screen of a point (u, v in the unit disc) of home h.
-    at(R, h, u, v) { const [x, y, rx, ry] = CRAB_HOMES[h]; return R.imageToScreen(x + u * rx, y + v * ry); }
+    at(R, h, u, v) { const [x, y, rx, ry] = this.homes[h]; return R.imageToScreen(x + u * rx, y + v * ry); }
     emerge(R, homes, taken = []) {
       // Surface on a rock or bank no other crab is on, if there is one.
       const free = homes.filter(h => !taken.includes(h)), pool = free.length ? free : homes, r = this.rnd; this.home = pool[Math.floor(r() * pool.length)]; const a = r() * TAU, d = Math.sqrt(r()) * .7;
       this.u = Math.cos(a) * d; this.v = Math.sin(a) * d; this.state = 'idle'; this.timer = 1 + r() * 3; this.alpha = 0;
     }
-    startle(x, y, radius) {
+    startle(x, y, radius, R) {
       if (this.state === 'hidden' || this.state === 'dive' || Math.hypot(this.x - x, this.y - y) > radius) return;
       // Run for the edge of its patch that faces away from the disturbance, then dive.
-      const a = Math.atan2(this.y - y, this.x - x); this.state = 'flee'; this.target = [Math.cos(a) * 1.05, Math.sin(a) * 1.05]; this.timer = 2;
+      const [rx,ry]=this.homes[this.home].slice(2),[ox,oy]=R.imageToScreen(0,0),
+        [xx,xy]=R.imageToScreen(1,0),[yx,yy]=R.imageToScreen(0,1);
+      const ax=xx-ox,ay=xy-oy,bx=yx-ox,by=yy-oy,det=ax*by-ay*bx,dx=this.x-x,dy=this.y-y;
+      const a=Math.atan2((ax*dy-ay*dx)/det/ry,(by*dx-bx*dy)/det/rx);
+      this.state = 'flee'; this.target = [Math.cos(a) * 1.05, Math.sin(a) * 1.05]; this.timer = 2;
     }
     update(dt, R, scale, homes, allowed, scene, taken) {
       const r = this.rnd;
-      if (!allowed && this.state !== 'hidden' && this.state !== 'dive') { this.state = 'flee'; this.target = [this.u * 1.6 + .01, this.v * 1.6]; this.timer = 2; }
+      if (!allowed && !['hidden','dive','flee'].includes(this.state)) { const a=Math.atan2(this.v,this.u+.01);this.state = 'flee'; this.target = [Math.cos(a)*1.05,Math.sin(a)*1.05]; this.timer = 2; }
       if (this.state === 'hidden') { this.timer -= dt; if (this.timer <= 0 && allowed && homes.length) this.emerge(R, homes, taken); return; }
       if (this.state === 'dive') { this.alpha -= dt * 1.6; if (this.alpha <= 0) { this.state = 'hidden'; this.timer = 12 + r() * 25; } return; }
       this.alpha = Math.min(1, this.alpha + dt * 1.2);
-      const [, , rx, ry] = CRAB_HOMES[this.home], k = Math.hypot(...R.imageToScreen(1, 0).map((c, i) => c - R.imageToScreen(0, 0)[i]));
       if (this.state === 'idle') {
         this.timer -= dt; this.speed *= Math.exp(-dt * 8);
         if (this.waveT <= 0 && r() < dt * .12) this.waveT = 1.2;
@@ -261,7 +315,9 @@
         const go = (this.state === 'flee' ? 80 : 24) * scale * this.size, aligned = Math.abs(wrap(want - this.heading)) < .6 ? 1 : .25;
         this.speed += (go * aligned - this.speed) * Math.min(1, dt * 6);
         const step = Math.min(d, this.speed * dt);
-        if (d > .5) { this.u += dx / d * step / (rx * k); this.v += dy / d * step / (ry * k); }
+        // Interpolate in painting coordinates. Screen axes turn with the pond
+        // on a phone; adding screen dx/dy to u/v made crabs drift off their rock.
+        if (d > .5) { const t=step/d;this.u+=(this.target[0]-this.u)*t;this.v+=(this.target[1]-this.v)*t; }
         this.walk += this.speed * dt / (3.6 * scale);
         this.timer -= dt;
         if (d < 1.5 || this.timer <= 0) {
@@ -300,13 +356,11 @@
       this.R = R; this.sim = sim; this.rnd = rnd; this.time = 0; this.w = 1; this.h = 1; this.scale = 1;
       this.turtles = [0, 1].map(v => new Turtle(v, rnd));
       this.butterflies = [0, 1, 2].map(s => new Butterfly(s, rnd));
-      this.dragonflies = [new Dragonfly(rnd() < .7 ? 0 : 1, rnd)];
+      this.dragonflies = [0, 1].map(s => new Dragonfly(s, rnd));
       this.crabs = [0, 1, 0].map(v => new Crab(v, rnd)); this.crabHomes = [];
-      // Rocks first, then leaves largest to smallest, then petals, buds and flowers on top; each sways on its own clock.
-      const rank = f => ({ r: 0, l: 1, f: f[2] > 25 ? 4 : 2, b: 3 })[f[3]];
-      // Each also carries a small spring (angle ja, offset ox/oy) that raindrops knock and that settles back.
-      this.floaters = FLOATERS.map(f => ({ f, p: [rnd() * TAU, rnd() * TAU, rnd() * TAU, rnd() * TAU], sp: .8 + rnd() * .4, seed: rnd(), ja: 0, jv: 0, ox: 0, oy: 0, vx: 0, vy: 0, dx: 0, dy: 0 })).sort((a, b) => rank(a.f) - rank(b.f) || b.f[2] - a.f[2]);
       this.petals = []; this.flies = []; this.rain = []; this.snow = []; this.splashes = []; this.wakes = new Map();
+      this.lotusPlants = []; this.plantRipples = []; this.waterRipples = [];
+      this.setSeason('spring');
       // Lightning in a downpour; each flash asks the app for the thunder that follows it.
       this.bolts = []; this.nextBolt = 15; this.events = []; this.calm = !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches);
       this.wetCover = 0;
@@ -314,15 +368,80 @@
       this.pose = new Float32Array((BODY.segments + 1) * 4);
       this.spots = []; this.finTint = PALETTES.map(p => [...rgb(p.fin), .9]);
     }
-    dragonflyWeather(settings) { return settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
+    setSeason(season) {
+      this.season=season in POND_MAPS?season:'spring';this.map=POND_MAPS[this.season];
+      this.insects = SEASONAL_INSECTS[this.season];
+      this.activeButterflies = this.butterflies.filter(b => this.insects.butterflies.includes(b.species));
+      this.activeDragonflies = this.dragonflies.filter(d => this.insects.dragonflies.includes(d.species));
+      // Perches and flowers change with the painting; restart flight instead of keeping stale targets.
+      for (const b of this.butterflies) Object.assign(b, { target: null, state: 'fly', vx: 0, vy: 0, alt: .8, timer: 0, glide: 0 });
+      for (const d of this.dragonflies) Object.assign(d, { target: null, state: 'hover', vx: 0, vy: 0, alt: .7, timer: 1, touched: false });
+      this.flies.length = 0;
+      const driftDefs = root.POND_DRIFTERS?.[this.season] || [];
+      // Extracted blossoms are now independent sprites; stop redrawing their old image locations.
+      this.floaterDefs=floaterDefinitions(this.season);
+      this.lotusDefs=this.floaterDefs.filter(f=>f[3]==='f'&&f[2]>25);
+      const rnd=this.rnd,rank=f=>({r:0,l:1,f:f[2]>25?4:2,b:3})[f[3]];
+      this.drifters = driftDefs.map(d => ({ ...d, x: 0, y: 0, a: 0, vx: 0, vy: 0, flow: rnd() * TAU, aim: rnd() * TAU, turnIn: 5 + rnd() * 9, speed: 2.8 + rnd() * 2.8, spin: (rnd() - .5) * .12, phase: rnd() * TAU, visible: false }));
+      this.floaters=this.floaterDefs.map(f=>({f,p:[rnd()*TAU,rnd()*TAU,rnd()*TAU,rnd()*TAU],sp:.8+rnd()*.4,seed:rnd(),ja:0,jv:0,ox:0,oy:0,vx:0,vy:0,dx:0,dy:0})).sort((a,b)=>rank(a.f)-rank(b.f)||b.f[2]-a.f[2]);
+      this.crabHomeDefs=this.season==='spring'?CRAB_HOMES:this.floaterDefs.filter(f=>f[3]==='r').map(([x,y,rx,,ry])=>[x,y,rx*.6,ry*.6]);
+      for(const c of this.crabs){c.homes=this.crabHomeDefs;c.home=0;c.state='hidden';c.alpha=0;c.timer=1+rnd()*5;}
+      this.petals.length=0;this.splashes.length=0;this.rain.length=0;this.wakes.clear();this.waterRipples.length=0;
+      this.snowCover=0;this.wetCover=0;
+    }
+    butterflyWeather(settings) { return this.activeButterflies.length > 0 && settings.butterflies && !settings.night && settings.weather === 'sunny'; }
+    dragonflyWeather(settings) { return this.activeDragonflies.length > 0 && settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
+    fireflyWeather(settings) { return this.insects.fireflies > 0 && settings.butterflies && settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
     // Something disturbed the water at (x, y): crabs close by bolt for it and dive.
-    startle(x, y) { for (const c of this.crabs) c.startle(x, y, 130 * this.scale); }
-    drop(x, y, r, s) { this.R.drop(x, y, r, s); for (const p of this.petals) { const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy); if (d < r * 8 && d > 0) { p.vx += dx / d * s * 40; p.vy += dy / d * s * 40; } } }
+    startle(x, y) {
+      for (const c of this.crabs) c.startle(x, y, 130 * this.scale, this.R);
+      for (const t of this.turtles) t.startle(x, y, this.w, this.h, 170 * this.scale, this.sim.habitat);
+    }
+    drop(x, y, r, s, rain = false) {
+      // Large disturbances stay limited to two; small rain impacts need continuous waves.
+      this.waterRipples = this.waterRipples.filter(p => p.until > this.time);
+      if (s > .05 && (rain || this.waterRipples.length < 2)) {
+        if (!rain) this.waterRipples.push({ until: this.time + 1.8 });
+        // Canvas uses the small impact sprites below instead of making a second, large ring.
+        if (!rain || this.R.ripples !== false) this.R.drop(x, y, r, s * .65);
+      }
+      for (const particles of [this.petals, this.drifters]) for (const p of particles) {
+        if (p.visible === false) continue;
+        const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
+        if (d < r * 8 && d > 0) { p.vx += dx / d * s * 40; p.vy += dy / d * s * 40; }
+      }
+      // Feed, fish wakes and rain send a travelling impulse through the lotus patch.
+      // Delay the response until the wave reaches it, then let the tethered plant settle.
+      if (s <= .08) return;
+      for (const p of this.lotusPlants) {
+        const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy), reach = 280 * this.scale + r;
+        if (d > reach || this.plantRipples.length >= 96) continue;
+        this.plantRipples.push({ p, at: this.time + Math.max(0, d - p.r - r) / (200 * this.scale), k: s * Math.exp(-d / (140 * this.scale)), nx: d ? dx / d : 0, ny: d ? dy / d : 1 });
+      }
+    }
     splash(x, y, s, leaf) {
       if (this.splashes.length > 260) return;
       const rnd = this.rnd, k = this.scale * s;
       this.splashes.push({ x, y, s: k, age: 0, life: leaf ? .3 : .38, ring: true, leaf });
       for (let i = 2 + Math.floor(rnd() * (leaf ? 4 : 3)); i > 0; i--) { const a = rnd() * TAU, v = (28 + rnd() * 52) * k; this.splashes.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, s: k * (.6 + rnd() * .5), age: 0, life: .16 + rnd() * .16, ring: false }); }
+    }
+    resetRainDrop(d, initial = false) {
+      const rnd = this.rnd, lean = .12 + (this.rainK || 0) * .06;
+      const x = rnd() * this.w, y = rnd() * this.h;
+      // Some streaks are in front of the pond; the ones reaching its surface end at a real water point.
+      d.water = rnd() < .42 && this.sim.isWater(x, y, 22 * this.scale)
+        && !this.lotusPlants.some(p => Math.hypot(p.x - x, p.y - y) < p.r);
+      d.hitX = d.water ? x : rnd() * (this.w + 80) - 60;
+      d.hitY = d.water ? y : this.h + 60;
+      d.lean = lean;
+      d.y = initial ? -60 + rnd() * (d.hitY + 60) : -60 - rnd() * 60;
+      d.x = d.hitX - (d.hitY - d.y) * lean;
+      return d;
+    }
+    rainImpact(d, rainK) {
+      if (!this.sim.isWater(d.hitX, d.hitY, 22 * this.scale)) return;
+      this.drop(d.hitX, d.hitY, (3 + d.z * 2) * this.scale, (.22 + d.z * .2) * (.7 + .5 * rainK), true);
+      if (this.splashes.length < 260) this.splashes.push({ x: d.hitX, y: d.hitY, s: (1.7 + d.z) * this.scale, age: 0, life: .58 + d.z * .18, ring: true, rain: true });
     }
     // A raindrop landing on a leaf, flower or rock: splash where it struck, and knock the thing (lighter things jump more).
     hit(fl, rainK) {
@@ -335,13 +454,49 @@
     }
     layout(w, h) {
       this.w = w; this.h = h; this.scale = clamp(Math.min(w, h) / 800, .62, 1.12);
+      this.rain.length = 0;
+      this.splashes = this.splashes.filter(p => !p.rain);
       const R = this.R, inside = ([x, y]) => x > 20 && x < w - 20 && y > 20 && y < h - 20;
-      this.spots = FLOATERS.filter(f => f[3] !== 'r' && f[2] > 25).map(([x, y]) => R.imageToScreen(x, y)).filter(inside);
-      this.buds = FLOATERS.filter(f => f[3] === 'b').map(([x, y, rx, k, ry = rx, rot = 0]) => R.imageToScreen(x - Math.sin(rot) * ry * .7, y - Math.cos(rot) * ry * .7)).filter(inside);
+      this.spots = this.floaterDefs.filter(f => f[3] !== 'r' && f[2] > 25).map(([x, y]) => R.imageToScreen(x, y)).filter(inside);
+      this.buds = this.floaterDefs.filter(f => f[3] === 'b').map(([x, y, rx, k, ry = rx, rot = 0]) => R.imageToScreen(x - Math.sin(rot) * ry * .7, y - Math.cos(rot) * ry * .7)).filter(inside);
       for (const d of this.dragonflies) { d.x = -1; d.state = 'hover'; d.timer = 1; }
-      // Koi may slip under the rim of a leaf, but not through rocks.
+      // Image-space habitat is transformed by the renderer, including portrait
+      // rotation and cover cropping, so fish and food always match the painting.
       const [x0, y0] = R.imageToScreen(0, 0), [x1, y1] = R.imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0);
-      this.sim.obstacles = FLOATERS.filter(f => f[2] > 25).map(([x, y, rx, kind, ry = rx]) => { const [sx, sy] = R.imageToScreen(x, y); return { x: sx, y: sy, r: Math.min(rx, ry) * k * (kind === 'r' ? .95 : .55) }; });
+      this.sim.obstacles = [];
+      this.sim.setHabitat(new PondHabitat(w,h,(x,y)=>R.imageToScreen(x,y),this.map));
+      const [x2, y2] = R.imageToScreen(0, 1);
+      this.driftBasis = { x0, y0, ux: x1-x0, uy: y1-y0, vx: x2-x0, vy: y2-y0, k, angle: Math.atan2(y1-y0, x1-x0) };
+      for (const p of this.drifters) {
+        [p.x, p.y] = R.imageToScreen(p.ix, p.iy);
+        p.s = k; p.r = Math.hypot(p.w, p.h) * k / 2 + 3 * this.scale;
+        // Off-screen objects stay off-screen instead of accumulating along a phone's crop edges.
+        p.visible = p.x > p.r && p.x < w-p.r && p.y > p.r && p.y < h-p.r;
+        if (p.visible) {
+          const safe = this.sim.habitat.project(p.x, p.y, p.r);
+          p.visible = !!safe;
+          if (safe) { [p.x, p.y] = safe; this.rememberDrifter(p); }
+        }
+      }
+      for (const p of this.petals) {
+        p.x *= this.prevW ? w/this.prevW : 1; p.y *= this.prevH ? h/this.prevH : 1;
+        p.r = 12 * p.s * this.scale;
+        const safe = this.sim.habitat.project(p.x, p.y, p.r);
+        if (safe) [p.x, p.y] = safe; else p.age = p.life;
+      }
+      // Keep the patch in the visible lower-left corner even when the pond rotates on a phone.
+      // Project the whole plant's footprint into water, away from rocks and the dry bank.
+      this.plantRipples.length = 0;
+      const [ix, iy] = R.imageToScreen(590, 930);
+      this.lotusPlants=LOTUS_PLANTS[this.season].map(([sprite,dx,dy,size,angle],i)=>{
+        const s=size*this.scale,leaf=sprite.includes('Leaf'),r=(leaf?48:sprite==='lotusStem'?82:72)*s,motionMargin=20*this.scale;
+        const [x,y]=this.sim.habitat.project(ix+dx*this.scale,iy+dy*this.scale,r+motionMargin);
+        return {sprite,x,y,s,angle,phase:i*2.17,r,leaf,motionMargin,rootOffset:sprite==='lotusFlower'?30*s:0,ox:0,oy:0,vx:0,vy:0,ja:0,jv:0,bend:0,bv:0};
+      });
+      for(const p of this.lotusPlants){
+        if(p.sprite==='lotusFlower'||p.sprite==='lotusLeaf')this.spots.push([p.x,p.y]);
+        if(p.sprite==='lotusBud')this.buds.push([p.x,p.y-15*p.s]);
+      }
       // Leaves, flowers and rocks on screen, weighted by area, for raindrops to land on.
       this.targets = []; this.targetArea = 0;
       for (const fl of this.floaters) {
@@ -350,7 +505,7 @@
         this.targetArea += Math.PI * rx * ry * k * k; this.targets.push([this.targetArea, fl]);
       }
       // Crabs only live on the rocks and banks that are on screen.
-      this.crabHomes = CRAB_HOMES.map((c, i) => [i, R.imageToScreen(c[0], c[1])]).filter(([, [x, y]]) => x > 30 && x < w - 30 && y > 30 && y < h - 30).map(([i]) => i);
+      this.crabHomes = this.crabHomeDefs.map((c, i) => [i, R.imageToScreen(c[0], c[1])]).filter(([, [x, y]]) => x > 30 && x < w - 30 && y > 30 && y < h - 30).map(([i]) => i);
       for (const c of this.crabs) if (!this.crabHomes.includes(c.home)) { c.state = 'hidden'; c.timer = 1 + this.rnd() * 5; }
       this.causticCell = clamp(Math.min(w, h) / 7, 70, 150);
       const [mx, my] = R.imageToScreen(1000, 255); this.moonAt = [clamp(mx, w * .2, w * .8), clamp(my, h * .15, h * .5)]; this.phaseAt = 0;
@@ -361,12 +516,15 @@
       const target = lookFor(weather, night, amounts.rainAmount, amounts.snowAmount);
       if (dt === undefined) { const dir = this.look.shadowDir; this.look = target; this.look.shadowDir = dir; }
       else lerpLook(this.look, target, 1 - Math.exp(-dt * 1.1));
+      // Clear skies remove the previous weather's clouds immediately; lighting still eases toward sunlight.
+      if (target.cloudCover === 0) { this.look.cloudCover = 0; this.look.cloudShade = 0; }
       // Clouds sail right and a little down the screen at a pace that reads as moving without hurrying.
       const span = Math.max(this.w, this.h);
       Object.assign(this.look, { sun: [-.45, .45, .77], moonDisc: this.moonDisc || [0, 0, 1, 0], causticCell: this.causticCell || 80, cloudWind: [.021 * span, -.007 * span] });
     }
     update(dt, settings) {
       this.time += dt;
+      this.updatePlants(dt);
       if (this.time - this.phaseAt > 60 || !this.moonDisc) { this.phaseAt = this.time; this.phase = moonPhase(); }
       this.moonDisc = [this.moonAt[0], this.h - this.moonAt[1], 26 * this.scale, this.phase.angle];
       const rainK = clamp(settings.rainAmount ?? .5, 0, 1), snowK = clamp(settings.snowAmount ?? .5, 0, 1);
@@ -376,40 +534,45 @@
       // Rain soaks leaves and rocks quickly, then dries out slowly once it stops.
       this.wetCover = settings.weather === 'rain' ? Math.min(1, (this.wetCover || 0) + dt * (.04 + .1 * rainK)) : Math.max(0, (this.wetCover || 0) - dt * .02);
       this.look.wetCover = this.wetCover;
-      const { w, h, scale, rnd } = this, weather = settings.weather, night = settings.night;
+      const { w, h, scale, rnd } = this, weather = settings.weather;
       if (settings.turtles) for (const t of this.turtles) t.update(dt, w, h, scale, this);
       // Crabs come out in any weather but snow.
       const crabsOut = settings.crabs !== false && weather !== 'snow';
       for (const c of this.crabs) c.update(dt, this.R, scale, this.crabHomes, crabsOut, this, this.crabs.filter(o => o !== c && o.state !== 'hidden').map(o => o.home));
-      const flying = settings.butterflies && weather === 'sunny' && !night;
-      if (flying) for (const b of this.butterflies) b.update(dt, w, h, scale, this.spots, this.time);
-      if (this.dragonflyWeather(settings)) for (const d of this.dragonflies) d.update(dt, w, h, scale, this, this.buds.length ? this.buds : this.spots, this.time);
-      // Fireflies at night.
-      const wantFlies = settings.butterflies && night && weather !== 'rain' ? 14 : 0;
+      if (this.butterflyWeather(settings)) for (const b of this.activeButterflies) b.update(dt, w, h, scale, this.spots, this.time);
+      if (this.dragonflyWeather(settings)) for (const d of this.activeDragonflies) d.update(dt, w, h, scale, this, this.buds.length ? this.buds : this.spots, this.time);
+      // Fireflies belong to dry summer nights, never winter or falling snow.
+      const wantFlies = this.fireflyWeather(settings) ? this.insects.fireflies : 0;
       while (this.flies.length < wantFlies) this.flies.push({ x: rnd() * w, y: rnd() * h, a: rnd() * TAU, p: rnd() * TAU, s: .7 + rnd() * .6 });
       if (this.flies.length > wantFlies) this.flies.length = wantFlies;
       for (const f of this.flies) { f.a += (rnd() - .5) * dt * 2; f.x += Math.cos(f.a) * 14 * dt; f.y += Math.sin(f.a) * 14 * dt; f.p += dt; if (f.x < 0 || f.x > w || f.y < 0 || f.y > h) f.a += Math.PI; }
-      // Lotus petals drift on the surface and get pushed by ripples.
-      if (this.petals.length < 5 && rnd() < dt * .05) {
-        const lotus = LOTUS.map(([x, y]) => this.R.imageToScreen(x, y)).filter(([x, y]) => x > -40 && x < w + 40 && y > -40 && y < h + 40), p0 = lotus.length ? lotus[Math.floor(rnd() * lotus.length)] : [rnd() * w, rnd() * h];
-        this.petals.push({ x: p0[0] + (rnd() - .5) * 60, y: p0[1] + (rnd() - .5) * 60, a: rnd() * TAU, spin: (rnd() - .5) * .3, vx: (w / 2 - p0[0]) * .02, vy: (h / 2 - p0[1]) * .02, life: 60 + rnd() * 60, age: 0, s: .8 + rnd() * .5 });
+      // Detached flowers and leaves follow a slow changing current; ripples can nudge them.
+      for (const p of this.drifters) if (p.visible) { this.driftParticle(p, dt, p.s); this.rememberDrifter(p); }
+      if (this.petals.length < 2 && rnd() < dt * .015) {
+        const lotus = this.lotusDefs.map(([x, y]) => this.R.imageToScreen(x, y)).filter(([x, y]) => x > -40 && x < w + 40 && y > -40 && y < h + 40), p0 = lotus.length ? lotus[Math.floor(rnd() * lotus.length)] : [rnd() * w, rnd() * h];
+        const s=.8+rnd()*.5,r=12*s*scale,safe=this.sim.habitat.project(p0[0]+(rnd()-.5)*60,p0[1]+(rnd()-.5)*60,r);
+        if(safe)this.petals.push({ x: safe[0], y: safe[1], a: rnd()*TAU, spin: (rnd()-.5)*.12, vx: 0, vy: 0, life: 60+rnd()*60, age: 0, s, r, flow: rnd()*TAU, aim: rnd()*TAU, turnIn: 5+rnd()*9, speed: 2.8+rnd()*2.8, phase: rnd()*TAU });
       }
-      for (const p of this.petals) { p.age += dt; p.vx *= Math.exp(-dt * .5); p.vy *= Math.exp(-dt * .5); p.x += (p.vx + Math.sin(this.time * .1 + p.a) * 2) * dt; p.y += (p.vy + Math.cos(this.time * .08 + p.a) * 2) * dt; p.a += (p.spin + (Math.abs(p.vx) + Math.abs(p.vy)) * .004) * dt; }
-      this.petals = this.petals.filter(p => p.age < p.life && p.x > -60 && p.x < w + 60 && p.y > -60 && p.y < h + 60);
+      for (const p of this.petals) { p.age += dt; this.driftParticle(p, dt, scale); }
+      this.petals = this.petals.filter(p => p.age < p.life);
       // Rain streaks and drops; snowflakes melting into the pond.
       const rainN = weather === 'rain' ? Math.round((30 + 190 * rainK) * Math.min(1, w * h / 1.2e6) + 20) : 0;
+      this.rainK = rainK; this.look.rainK = weather === 'rain' ? rainK : 0;
       // Streaks at different distances: far ones short, faint and slow, near ones long, bright and fast.
-      while (this.rain.length < rainN) { const z = Math.pow(rnd(), 1.8); this.rain.push({ x: rnd() * w, y: rnd() * h, z, l: .5 + z * .9 + rnd() * .2, v: 600 + z * 700 + rnd() * 200 }); }
+      while (this.rain.length < rainN) { const z = Math.pow(rnd(), 1.8); this.rain.push(this.resetRainDrop({ z, l: .5 + z * .9 + rnd() * .2, v: 600 + z * 700 + rnd() * 200 }, true)); }
       if (this.rain.length > rainN) this.rain.length = rainN;
-      for (const d of this.rain) { d.y += d.v * dt; d.x += d.v * .12 * dt; if (d.y > h + 60) { d.y = -60 - rnd() * 60; d.x = rnd() * (w + 80) - 60; } }
+      for (const d of this.rain) {
+        d.y += d.v * dt; d.x = d.hitX - (d.hitY - d.y) * d.lean;
+        if (d.y >= d.hitY) {
+          if (d.water) this.rainImpact(d, rainK);
+          this.resetRainDrop(d);
+        }
+      }
       if (weather === 'rain') {
-        let n = dt * (10 + 80 * rainK) * Math.min(1.6, w * h / 1e6);
-        while (n > 0) { if (rnd() < n) { const x = rnd() * w, y = rnd() * h; this.drop(x, y, (3 + rnd() * 3) * scale, (.2 + rnd() * .3) * (.7 + .5 * rainK)); if (rnd() < .4) this.splash(x, y, .5 + rnd() * .4, false); } n -= 1; }
         // The same rain drums on the leaves, flowers and rocks: a splash crown where it lands, and a knock that sets it trembling.
         let m = dt * (14 + 90 * rainK) * this.targetArea / 1e6;
         while (m > 0) { if (rnd() < m && this.targets.length) { const pick = rnd() * this.targetArea; this.hit(this.targets.find(t => t[0] >= pick)[1], rainK); } m -= 1; }
       }
-      this.rainK = rainK; this.look.rainK = weather === 'rain' ? rainK : 0;
       for (const fl of this.floaters) {
         if (!fl.jv && !fl.ja && !fl.vx && !fl.vy && !fl.ox && !fl.oy) continue;
         const e = Math.min(dt, .05);
@@ -459,20 +622,81 @@
         }
       }
     }
+    rememberDrifter(p) {
+      const { x0, y0, ux, uy, vx, vy } = this.driftBasis, det = ux*vy-uy*vx;
+      p.ix = ((p.x-x0)*vy-(p.y-y0)*vx)/det;
+      p.iy = (ux*(p.y-y0)-uy*(p.x-x0))/det;
+    }
+    driftParticle(p, dt, unit) {
+      if (!dt) return;
+      p.turnIn -= dt;
+      if (p.turnIn <= 0) { p.aim = p.flow + (this.rnd()-.5)*2.4; p.turnIn = 6+this.rnd()*12; }
+      p.flow += wrap(p.aim-p.flow)*(1-Math.exp(-dt*.18));
+      const habitat = this.sim.habitat, room = habitat.sample(p.x,p.y), gust = .8+this.look.wave*.3;
+      const speed = p.speed*unit*gust, breeze = this.time*.035;
+      let vx = (Math.cos(p.flow)+Math.sin(breeze)*.35)*speed, vy = (Math.sin(p.flow)+Math.cos(breeze*.73)*.22)*speed;
+      const near = clamp(1-(room.distance-p.r)/(24*unit),0,1);
+      vx += room.nx*speed*near*2; vy += room.ny*speed*near*2;
+      const smooth = 1-Math.exp(-dt*.55);
+      p.vx += (vx-p.vx)*smooth; p.vy += (vy-p.vy)*smooth;
+      const v = Math.hypot(p.vx,p.vy), max = Math.max(16,36*unit);
+      if (v > max) { p.vx *= max/v; p.vy *= max/v; }
+      const steps = Math.max(1,Math.ceil(Math.hypot(p.vx,p.vy)*dt/2));
+      for (let i=0;i<steps;i++) {
+        const x=p.x+p.vx*dt/steps,y=p.y+p.vy*dt/steps;
+        if (habitat.contains(x,y,p.r)) { p.x=x; p.y=y; }
+        else {
+          const edge=habitat.sample(x,y),out=p.vx*edge.nx+p.vy*edge.ny;
+          if(out<0){p.vx-=edge.nx*out*1.4;p.vy-=edge.ny*out*1.4;}
+          p.aim=Math.atan2(edge.ny,edge.nx)+(this.rnd()-.5)*.8;p.turnIn=4+this.rnd()*6;
+          break;
+        }
+      }
+      p.a = wrap(p.a+(p.spin+Math.sin(this.time*.17+p.phase)*.025)*dt);
+    }
+    updatePlants(dt) {
+      this.plantRipples = this.plantRipples.filter(hit => {
+        if (hit.at > this.time) return true;
+        const { p, k, nx, ny } = hit;
+        p.vx += nx * k * 16; p.vy += ny * k * 13;
+        p.jv += (nx - ny * .5) * k * .32; p.bv += k * 19;
+        return false;
+      });
+      const e = Math.min(dt, .05);
+      for (const p of this.lotusPlants) {
+        p.vx += (-18 * p.ox - 3.8 * p.vx) * e; p.vy += (-18 * p.oy - 3.8 * p.vy) * e;
+        p.ox = clamp(p.ox + p.vx * e, -4, 4); p.oy = clamp(p.oy + p.vy * e, -4, 4);
+        p.jv += (-24 * p.ja - 3.8 * p.jv) * e; p.ja = clamp(p.ja + p.jv * e, -.08, .08);
+        p.bv += (-28 * p.bend - 4.5 * p.bv) * e; p.bend = clamp(p.bend + p.bv * e, -4, 4);
+      }
+    }
+    plantPose(p) {
+      const t = this.time, unit = this.scale, calm = this.calm ? .3 : 1;
+      const wind = (.75 + this.look.wave * .8 + (this.look.rainK || 0) * .45) * calm;
+      const gust = Math.sin(t * .88 - p.x * .002 + p.phase * .12) + .32 * Math.sin(t * 1.71 + p.phase);
+      const bob = Math.sin(t * 1.3 + p.phase) + .28 * Math.sin(t * 2.1 + p.phase * .7);
+      return {
+        x: p.x + ((p.leaf ? 2.8 : .7) * gust * wind + p.ox) * unit,
+        y: p.y + p.rootOffset + ((p.leaf ? 1.6 : .5) * bob * calm + p.oy) * unit,
+        angle: p.angle + (p.leaf ? .043 : .07) * gust * wind + p.ja,
+        sy: p.s * (1 + (p.leaf ? .018 : .008) * bob * calm),
+        bend: ((p.leaf ? 1.7 : 3.8) * gust * wind + p.bend) * unit
+      };
+    }
     bodyLight(f) {
       if (!f.light || f.light.seed !== f.seed || f.light.palette !== f.palette || f.light.species !== f.species) {
         const girth = girthOf(f.seed), widths = new Float32Array(BODY.segments + 1), kind = fishPalette(f).kind;
         for (let i = 0; i <= BODY.segments; i++) widths[i] = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girth, kind) / BODY.half;
-        f.light = { species: f.species, seed: f.seed, palette: f.palette, widths, metal: kind === 'ogon' ? 1 : 0, gloss: kind === 'ogon' ? .36 : kind === 'karasu' ? .16 : .5 };
+        f.light = { species: f.species, seed: f.seed, palette: f.palette, widths, metal: kind === 'ogon' ? 1 : 0, gloss: kind === 'ogon' ? .28 : kind === 'karasu' ? .14 : .32 };
       }
       return f.light;
     }
     koi(f, cell) {
       const R = this.R, look = this.look, s = f.size * this.sim.scale, pose = fishPose(f, s, this.pose), cx = f.x * this.w, cy = f.y * this.h;
-      const k = 1 - f.depth * .09, fogA = .03 + f.depth * .28, fog = [look.water[0], look.water[1], look.water[2], fogA];
+      const k = 1 - f.depth * .09, fogA = .05 + f.depth * .34, fog = [look.water[0], look.water[1], look.water[2], fogA];
       // The shadow lies on the bed: a fish near the bottom casts a dark, sharp one right beside it;
       // one cruising at the surface casts it further off, larger in blur and a little paler.
-      const off = (6 + (1 - f.depth) * 30) * this.scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .92 - (1 - f.depth) * .22], blur = [(1 - f.depth) * 1.1, 0, 0, 0];
+      const off = (6 + (1 - f.depth) * 30) * this.scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .72 - (1 - f.depth) * .18], blur = [(1 - f.depth) * 1.1, 0, 0, 0];
       // Pectoral fins spread when gliding or braking, fold back at speed, the inner one flares in a turn.
       const L = BODY.length * s, bl = f.v / L, pal = fishPalette(f), slender = pal.kind === 'silvercarp', finDef = R.sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'];
       const tint = pal.kind === 'utsuri' ? [1, 1, 1, .92] : f.species === 'silvercarp' ? [...rgb(pal.fin), .85] : this.finTint[f.palette];
@@ -509,6 +733,18 @@
         fl.dx = move * Math.sin(t * .29 * sp + p[2]) + fl.ox * scale; fl.dy = move * Math.cos(t * .23 * sp + p[3]) + fl.oy * scale;
         R.floater(x, y, rx * gr, ry * gr, rot, angle + fl.ja, fl.dx, fl.dy, (big ? 1.8 : petal ? 3.5 : 2.6) * scale, big ? 1 : kind === 'l' ? .6 : .32, kind === 'l' ? 1 : .45, big ? 1 : 0, fl.seed);
       }
+      // Paint the original detached flowers and leaves at their drifting positions, with pond lighting.
+      for (const p of this.drifters) if (p.visible && R.sprites[p.sprite]) {
+        const def=R.sprites[p.sprite],a=p.a+this.driftBasis.angle,off=2*this.scale;
+        R.sprite('plantShadow',def,p.x+look.shadowDir[0]*off,p.y+look.shadowDir[1]*off,a,p.s,p.s,[0,0,0,.24]);
+        R.sprite('plants',def,p.x,p.y,a,p.s,p.s);
+      }
+      // Seasonal lotus leaves float over fish; flowers and seed heads sway above them.
+      for(const p of this.lotusPlants){
+        const def=R.sprites[p.sprite],{x,y,angle,sy,bend}=this.plantPose(p),off=(p.leaf?2:6)*scale;
+        R.plant('plantShadow',def,x+look.shadowDir[0]*off,y+look.shadowDir[1]*off,angle,p.s,sy,bend,p.leaf,scale,[0,0,0,p.leaf?.36:.22],[p.leaf?.35:.7,0,0,0]);
+        R.plant('plants',def,x,y,angle,p.s,sy,bend,p.leaf,scale);
+      }
       // Floating: petals and food.
       for (const p of this.petals) {
         const fade = Math.min(1, p.age / 3, (p.life - p.age) / 4), s = scale * p.s;
@@ -523,15 +759,20 @@
       }
       for (const c of this.crabs) c.draw(R, scale, look);
       // Air: butterflies or fireflies, rain, snow.
-      if (settings.butterflies && settings.weather === 'sunny' && !settings.night) for (const b of this.butterflies) b.draw(R, scale, look);
-      if (this.dragonflyWeather(settings)) for (const d of this.dragonflies) d.draw(R, scale, look);
-      for (const f of this.flies) { const glow = Math.pow(Math.max(0, Math.sin(f.p * 1.3 * f.s)), 3); R.sprite('glow', R.sprites.dot, f.x, f.y, 0, .9 * f.s, .9 * f.s, [.75 * glow, 1 * glow, .45 * glow, 1]); R.sprite('glow', R.sprites.dot, f.x, f.y, 0, .25, .25, [.9 * glow, 1 * glow, .7 * glow, 1]); }
+      if (this.butterflyWeather(settings)) for (const b of this.activeButterflies) b.draw(R, scale, look);
+      if (this.dragonflyWeather(settings)) for (const d of this.activeDragonflies) d.draw(R, scale, look);
+      if (this.fireflyWeather(settings)) for (const f of this.flies) { const glow = Math.pow(Math.max(0, Math.sin(f.p * 1.3 * f.s)), 3); R.sprite('glow', R.sprites.dot, f.x, f.y, 0, .9 * f.s, .9 * f.s, [.75 * glow, 1 * glow, .45 * glow, 1]); R.sprite('glow', R.sprites.dot, f.x, f.y, 0, .25, .25, [.9 * glow, 1 * glow, .7 * glow, 1]); }
       const rk = this.rainK || 0;
-      for (const d of this.rain) { const a = (.07 + .2 * d.z) * (.75 + .5 * rk); R.sprite('air', R.sprites.streak, d.x, d.y, -.12 - rk * .06, .7 + .7 * d.z, d.l * (.4 + .25 * rk) * scale, [.9 * a, .95 * a, a, a]); }
+      for (const d of this.rain) { const a = (.07 + .2 * d.z) * (.75 + .5 * rk); R.sprite('air', R.sprites.streak, d.x, d.y, -Math.atan(d.lean), .7 + .7 * d.z, d.l * (.4 + .25 * rk) * scale, [.9 * a, .95 * a, a, a]); }
       // Splash crowns: a quick ring where each drop lands, and a few droplets flung out from it.
       for (const p of this.splashes) {
         const t = p.age / p.life;
-        if (p.ring) { const r = p.s * (.25 + .75 * Math.sqrt(t)), a = Math.pow(1 - t, 1.6) * (p.leaf ? .75 : .45); R.sprite('surface', R.sprites.ring, p.x, p.y, 0, r, r * .9, [lit[0] * a, lit[1] * a, lit[2] * a, a]); }
+        if (p.rain) {
+          const r = p.s * (.2 + .8 * Math.sqrt(t)), a = Math.pow(1 - t, 1.3) * .6;
+          R.sprite('surface', R.sprites.ring, p.x, p.y + .8 * scale, 0, r, r * .86, [.08, .16, .18, a * .3]);
+          R.sprite('surface', R.sprites.ring, p.x, p.y, 0, r, r * .86, [.76, .88, .93, a]);
+        }
+        else if (p.ring) { const r = p.s * (.25 + .75 * Math.sqrt(t)), a = Math.pow(1 - t, 1.6) * (p.leaf ? .75 : .45); R.sprite('surface', R.sprites.ring, p.x, p.y, 0, r, r * .9, [lit[0] * a, lit[1] * a, lit[2] * a, a]); }
         else { const a = (1 - t) * .8, r = p.s * .16 * (1 - t * .4); R.sprite('air', R.sprites.dot, p.x, p.y, 0, r, r, [a, a, a, a]); }
       }
       for (const f of this.snow) {
@@ -562,7 +803,7 @@
       }
     }
     ctx.globalAlpha = 1;
-    root.PondGL.drawStrip2D(ctx, sprite, pose, s, x, y, 1);
+    root.PondGL.drawStrip2D(ctx, sprite, pose, s, x, y, 1, true);
   }
   root.PondScene = { PondScene, drawKoi2D, lookFor, floatMask, moonPhase };
 })(window);

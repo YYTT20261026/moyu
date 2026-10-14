@@ -14,7 +14,7 @@ namespace BichiPond
             {
                 if (!first)
                 {
-                    MessageBox.Show("碧池观鱼已经在运行，可在任务栏通知区域的锦鲤图标中打开或退出。", "碧池观鱼", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("摸鱼已经在运行，可在任务栏通知区域的锦鲤图标中打开或退出。", "摸鱼", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
                 Application.EnableVisualStyles();

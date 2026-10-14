@@ -1,5 +1,5 @@
 {
-  "title": "碧池观鱼 · Koi Pond",
+  "title": "摸鱼 · Koi Pond",
   "description": "俯视锦鲤池塘，点击投喂，晴雨雪天气，锦鲤命名与食量排行。独立复刻。",
   "type": "web",
   "file": "index.html",
@@ -76,73 +76,43 @@
         "order": 5
       },
       "water": {
-        "text": "水声",
+        "text": "池水轻漾",
         "type": "bool",
         "value": true,
         "order": 6
       },
-      "watertype": {
-        "text": "水声种类",
-        "type": "combo",
-        "value": "stream",
-        "options": [
-          {
-            "label": "溪流潺潺",
-            "value": "stream"
-          },
-          {
-            "label": "山泉叮咚",
-            "value": "spring"
-          },
-          {
-            "label": "叠水瀑声",
-            "value": "cascade"
-          },
-          {
-            "label": "池水轻漾",
-            "value": "lapping"
-          },
-          {
-            "label": "竹筒惊鹿",
-            "value": "bamboo"
-          }
-        ],
+      "watervolume": {
+        "text": "池水音量",
+        "type": "slider",
+        "value": 0.2,
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "fraction": true,
+        "precision": 2,
         "order": 7
       },
       "weathersound": {
-        "text": "天气环境音",
+        "text": "四季环境音",
         "type": "bool",
         "value": true,
         "order": 8
       },
-      "music": {
-        "text": "禅意音乐",
-        "type": "combo",
-        "value": "guqin",
-        "options": [
-          {
-            "label": "古琴",
-            "value": "guqin"
-          },
-          {
-            "label": "颂钵",
-            "value": "bowl"
-          },
-          {
-            "label": "风铃",
-            "value": "chimes"
-          },
-          {
-            "label": "关闭",
-            "value": "off"
-          }
-        ],
+      "weathervolume": {
+        "text": "四季环境音量",
+        "type": "slider",
+        "value": 0.8,
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "fraction": true,
+        "precision": 2,
         "order": 9
       },
       "volume": {
         "text": "总音量",
         "type": "slider",
-        "value": 0.7,
+        "value": 0.45,
         "min": 0,
         "max": 1,
         "step": 0.05,

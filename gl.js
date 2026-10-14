@@ -82,6 +82,8 @@ precision highp float;
 uniform sampler2D uNoise; uniform vec2 uView, uWind; uniform float uTime, uCover, uUnit;
 in vec2 vUv; out vec4 o;
 void main(){
+  // A noise threshold alone still casts shadows at zero cover.
+  if(uCover <= 0.){ o = vec4(0., 0., 0., 1.); return; }
   vec2 p = vUv * uView / uUnit - uWind * uTime;
   vec2 warp = vec2(texture(uNoise, p * .7 + vec2(.13, uTime * .0011)).a, texture(uNoise, p * .7 + vec2(.61, -uTime * .0009)).g) - .5;
   p += warp * .08;
@@ -116,11 +118,21 @@ void main(){
 }`;
 
   const VS_SPRITE = `#version 300 es
+precision highp float;
 in vec2 aPos; in vec2 aUv; in vec4 aColor; in vec4 aFog; in vec4 aLight;
-uniform vec2 uView;
-out vec2 vUv; out vec4 vColor; out vec4 vFog; out vec4 vLight; out vec2 vScreen;
+uniform vec2 uView; uniform sampler2D uPlantSurface;
+out vec2 vUv; out vec4 vColor; out vec4 vFog; out vec4 vLight; out vec2 vScreen; out vec2 vPlantSlope;
 void main(){
-  vec2 c = aPos / uView * 2. - 1.; c.y = -c.y;
+  vec2 pos = aPos; vPlantSlope = vec2(0.);
+  // The leaf mesh rides the very same wind/ripple slope map as the water.
+  // Negative gloss tags plants; ordinary sprites and koi keep their existing geometry.
+  if (aLight.w < 0.) {
+    vec2 uv = vec2(pos.x / uView.x, 1. - pos.y / uView.y);
+    vPlantSlope = (textureLod(uPlantSurface, uv, 0.).rg - .5) * 4.;
+    float flex = aLight.w > -1.5 ? 1. : pow(max(0., -aLight.y), 2.);
+    pos += vec2(vPlantSlope.x, -vPlantSlope.y) * aLight.z * 2.8 * flex;
+  }
+  vec2 c = pos / uView * 2. - 1.; c.y = -c.y;
   gl_Position = vec4(c, 0., 1.);
   vScreen = c * .5 + .5; vUv = aUv; vColor = aColor; vFog = aFog; vLight = aLight;
 }`;
@@ -128,7 +140,8 @@ void main(){
   const FS_SPRITE = `#version 300 es
 precision highp float;
 uniform sampler2D uTex, uCaustic, uCloud; uniform int uMode; uniform float uBias, uCausticK, uLightK, uShadowCloud; uniform vec3 uLight;
-in vec2 vUv; in vec4 vColor; in vec4 vFog; in vec4 vLight; in vec2 vScreen; out vec4 o;
+uniform vec4 uPlantLook, uPlantAir; uniform vec3 uPlantTint, uPlantSky;
+in vec2 vUv; in vec4 vColor; in vec4 vFog; in vec4 vLight; in vec2 vScreen; in vec2 vPlantSlope; out vec4 o;
 void main(){
   // Shadows carry their own blur in vFog.x: fish near the surface cast softer shadows than those near the bed.
   vec4 t = texture(uTex, vUv, uBias + (uMode == 1 ? vFog.x : 0.));
@@ -138,6 +151,26 @@ void main(){
   float a = t.a * vColor.a, sun = 1. - texture(uCloud, vScreen).r;
   if (uMode == 1) { o = vec4(0., 0., 0., a * mix(1., .35 + .65 * sun, uShadowCloud)); return; }
   vec3 rgb = t.rgb * vColor.rgb * vColor.a;
+  // Added plants receive the same cloud shade, sky colour and grading as the painted pond.
+  if (uMode == 3) {
+    vec3 c = rgb / max(a, .001);
+    if (vLight.w > -1.5 && vLight.w < 0.) {
+      vec3 n = normalize(vec3(vLight.xy * .18 - vPlantSlope * .32, 1.));
+      c *= 1. + dot(n.xy, normalize(uLight.xy)) * .38 * sun;
+      // Broad, quiet highlights travel across the painted leaf as it tilts.
+      c += vec3(.13, .17, .10) * pow(max(dot(n, normalize(uLight + vec3(0., 0., 1.))), 0.), 18.) * sun * uLightK;
+      c = mix(c, vec3(.10, .26, .23), (1. - smoothstep(.15, .8, t.a)) * .22);
+    }
+    float dim = (1. - sun) * uPlantLook.z;
+    c *= (1. - dim) * (1. - uPlantLook.w * .1);
+    c = mix(c, vec3(dot(c, vec3(.299, .587, .114))) * vec3(.93, .99, 1.07), min(1., dim * 1.1));
+    c = mix(c, uPlantSky, uPlantAir.x * .6);
+    c = mix(vec3(dot(c, vec3(.299, .587, .114))), c, uPlantLook.y) * uPlantLook.x * uPlantTint;
+    c = mix(c, uPlantSky * uPlantLook.x, uPlantAir.z * .3);
+    c += uPlantAir.w * (c * 1.3 + vec3(.1, .12, .16));
+    vec2 v = vScreen - .5; c *= 1. - dot(v, v) * uPlantAir.y;
+    o = vec4(c * a, a); return;
+  }
   if (vLight.y > .02) {
     float q = vLight.x / vLight.y, lat = clamp(q, -.999, .999), body = 1. - smoothstep(.96, 1.02, abs(q)), lk = uLightK * mix(.3, 1., sun);
     vec3 n = vec3(normalize(across + 1e-7) * lat, sqrt(1. - lat * lat)), L = normalize(uLight);
@@ -184,7 +217,7 @@ void main(){
 
   const FS_FINAL = `#version 300 es
 precision highp float;
-uniform sampler2D uScene, uSurface, uFloat, uNoise, uCloud;
+uniform sampler2D uScene, uSurface, uFloat, uNoise, uCloud, uBed;
 uniform vec4 uMoonDisc; uniform vec3 uBedU, uBedV; uniform vec2 uView;
 uniform float uRefract, uGlint, uSkyK, uVignette, uMoon, uBright, uSat, uShade, uTime, uCloudShade, uMist, uFlash;
 uniform vec3 uGlintColor, uSky, uTint, uSun;
@@ -239,6 +272,14 @@ void main(){
   col *= 1. - fm.b * (1. - fm.r) * .22;
   float l = dot(col, vec3(.299, .587, .114));
   col = mix(vec3(l), col, uSat) * uBright * uTint + night;
+  // Dry banks and emergent rocks keep their painted detail and receive no water refraction.
+  // They sit under the same sky as the pond, so drifting cloud shade and overcast colour must reach them too.
+  vec3 dry = texture(uBed, bedUv(vUv)).rgb;
+  dry *= 1. - dim;
+  dry = mix(dry * vec3(1.025, 1.01, .98), vec3(dot(dry, vec3(.299, .587, .114))) * vec3(.93, .99, 1.07), min(1., dim * 1.1));
+  dry = mix(dry, uSky, clamp(uSkyK * .5 + dim * .06, 0., .6));
+  dry = mix(vec3(dot(dry, vec3(.299, .587, .114))), dry, uSat) * uBright * uTint;
+  col = mix(col, dry, fm.r);
   // Rain mist drifting low over the water in slow banks.
   if (uMist > 0.) col = mix(col, uSky * uBright * 1.08, mistAt(vUv * uView, uTime) * uMist);
   col += uFlash * (col * 1.3 + vec3(.1, .12, .16));
@@ -398,7 +439,7 @@ void main(){
     }
   }
   const WHITE = [1, 1, 1, 1];
-  const LAYERS = ['shadow', 'under', 'floaters', 'surface', 'airShadow', 'air', 'glow'];
+  const LAYERS = ['shadow', 'under', 'floaters', 'surface', 'plantShadow', 'plants', 'airShadow', 'air', 'glow'];
 
   // Shelf-pack misc sprites under the fish cells.
   function packSprites(sprites) {
@@ -483,15 +524,29 @@ void main(){
     const noiseTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, noiseData(256), gl.LINEAR, gl.REPEAT);
     const waveTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, waveData(256), gl.LINEAR, gl.REPEAT);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    const bedTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, bedTex);
+    let bedTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, bedTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bedImage); gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    const floatTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, floatTex);
+    let floatTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, floatTex);
     if (floatMask) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, floatMask);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
     gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Four paintings share the render targets; decoded images and their GPU textures
+    // are prepared once, so a later selection only swaps texture references.
+    const backgrounds = new Map([[bedImage,{bed:bedTex,mask:floatTex}]]);
+    function prepareBackground(image,mask) {
+      if(backgrounds.has(image)||lost)return;
+      const upload=source=>{
+        const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+        return tex;
+      };
+      backgrounds.set(image,{bed:upload(image),mask:upload(mask)});
+    }
     const atlas = texture(ATLAS, ATLAS, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null, gl.LINEAR_MIPMAP_LINEAR);
     packSprites(sprites);
     gl.bindTexture(gl.TEXTURE_2D, atlas);
@@ -503,6 +558,7 @@ void main(){
     const batches = {}; for (const l of LAYERS) batches[l] = new Batch();
 
     function resize(w, h, dpr, quality) {
+      if(state.scene&&state.w===w&&state.h===h&&state.dpr===dpr&&state.quality===quality)return;
       Object.assign(state, { w, h, dpr, quality });
       const px = w * h * dpr * dpr, cap = quality === 'eco' ? 1.6e6 : 3.6e6, k = px > cap ? Math.sqrt(cap / px) : 1;
       canvas.width = Math.max(1, Math.round(w * dpr * k)); canvas.height = Math.max(1, Math.round(h * dpr * k));
@@ -541,12 +597,18 @@ void main(){
     function bindTex(unit, tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); }
     let lightDir = [-.45, .45, .77], lightK = 1;
     // shadowCloud: 1 for shadows cast on the water surface, which pale under a cloud; bed shadows are paled by the bed pass.
-    function drawBatch(b, mode, bias, causticK, shadowCloud = 0) {
+    function drawBatch(b, mode, bias, causticK, shadowCloud = 0, plantEnv) {
       if (!b.ni) return;
       const p = P.sprite; gl.useProgram(p);
       gl.uniform3fv(p.u('uLight'), lightDir); gl.uniform1f(p.u('uLightK'), lightK); gl.uniform1f(p.u('uShadowCloud'), shadowCloud);
       gl.uniform2f(p.u('uView'), state.w, state.h); gl.uniform1i(p.u('uMode'), mode); gl.uniform1f(p.u('uBias'), bias || 0); gl.uniform1f(p.u('uCausticK'), causticK || 0);
+      if (plantEnv) {
+        gl.uniform4f(p.u('uPlantLook'), plantEnv.bright, plantEnv.sat, plantEnv.cloudShade, plantEnv.wetCover || 0);
+        gl.uniform4f(p.u('uPlantAir'), plantEnv.skyK, plantEnv.vignette, plantEnv.mist || 0, plantEnv.flash || 0);
+        gl.uniform3fv(p.u('uPlantTint'), plantEnv.tint); gl.uniform3fv(p.u('uPlantSky'), plantEnv.sky);
+      }
       bindTex(0, atlas); gl.uniform1i(p.u('uTex'), 0); bindTex(1, state.caustic.tex); gl.uniform1i(p.u('uCaustic'), 1); bindTex(2, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 2);
+      bindTex(3, state.surface.tex); gl.uniform1i(p.u('uPlantSurface'), 3);
       drawElements(b);
     }
     function drawElements(b) {
@@ -575,7 +637,7 @@ void main(){
           gl.bindFramebuffer(gl.FRAMEBUFFER, state.sim[1].fb); drawQuad(); state.sim.reverse();
         }
         state.simAcc = Math.min(state.simAcc + dt * 90, 4);
-        const p = P.sim; gl.useProgram(p); gl.uniform2f(p.u('uTexel'), 1 / state.simW, 1 / state.simH); gl.uniform1f(p.u('uDamp'), .994); gl.uniform1f(p.u('uAspect'), aspect);
+        const p = P.sim; gl.useProgram(p); gl.uniform2f(p.u('uTexel'), 1 / state.simW, 1 / state.simH); gl.uniform1f(p.u('uDamp'), .975); gl.uniform1f(p.u('uAspect'), aspect);
         setBed(p); bindTex(1, floatTex); gl.uniform1i(p.u('uFloat'), 1);
         while (state.simAcc >= 1) {
           state.simAcc -= 1;
@@ -591,11 +653,16 @@ void main(){
       bindTex(0, noiseTex); gl.uniform1i(p.u('uNoise'), 0); drawQuad();
       // 3. Cloud shadows drifting over the pond: everything lit by the sun reads this.
       gl.bindFramebuffer(gl.FRAMEBUFFER, state.cloud.fb); gl.viewport(0, 0, state.cloud.w, state.cloud.h);
-      p = P.cloud; gl.useProgram(p);
-      const unit = Math.max(w, h) * 4.2;
-      gl.uniform2f(p.u('uView'), w, h); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCover'), env.cloudCover); gl.uniform1f(p.u('uUnit'), unit);
-      gl.uniform2f(p.u('uWind'), env.cloudWind[0] / unit, env.cloudWind[1] / unit);
-      bindTex(0, noiseTex); gl.uniform1i(p.u('uNoise'), 0); drawQuad();
+      if (env.cloudCover > 0) {
+        p = P.cloud; gl.useProgram(p);
+        const unit = Math.max(w, h) * 4.2;
+        gl.uniform2f(p.u('uView'), w, h); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCover'), env.cloudCover); gl.uniform1f(p.u('uUnit'), unit);
+        gl.uniform2f(p.u('uWind'), env.cloudWind[0] / unit, env.cloudWind[1] / unit);
+        bindTex(0, noiseTex); gl.uniform1i(p.u('uNoise'), 0); drawQuad();
+      } else {
+        // Clear the previous weather's cloud texture and skip noise generation under clear skies.
+        gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       // 4. Shadows cast on the bed.
       gl.bindFramebuffer(gl.FRAMEBUFFER, state.shadow.fb); gl.viewport(0, 0, state.shadow.w, state.shadow.h);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -634,6 +701,7 @@ void main(){
       setBed(p); gl.uniform4fv(p.u('uMoonDisc'), env.moonDisc); gl.uniform1f(p.u('uTime'), time);
       bindTex(0, state.scene.tex); gl.uniform1i(p.u('uScene'), 0); bindTex(1, state.surface.tex); gl.uniform1i(p.u('uSurface'), 1);
       bindTex(2, noiseTex); gl.uniform1i(p.u('uNoise'), 2); bindTex(3, floatTex); gl.uniform1i(p.u('uFloat'), 3); bindTex(4, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 4);
+      bindTex(5, bedTex); gl.uniform1i(p.u('uBed'), 5);
       drawQuad();
       // Leaves and flowers above the water.
       if (batches.floaters.ni) {
@@ -649,6 +717,8 @@ void main(){
       // 7. Things on and above the surface.
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       drawBatch(batches.surface, 0, 0, 0);
+      drawBatch(batches.plantShadow, 1, .4, 0, 1);
+      drawBatch(batches.plants, 3, -.8, 0, 0, env);
       drawBatch(batches.airShadow, 1, 2.6, 0, 1);
       drawBatch(batches.air, 0, -.2, 0);
       gl.blendFunc(gl.ONE, gl.ONE);
@@ -657,7 +727,14 @@ void main(){
     }
 
     const api = {
-      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setFish, render,
+      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setFish, render, prepareBackground,
+      setBackground(image, mask) {
+        prepareBackground(image,mask);if(lost)return;
+        bedImage=image;
+        const cached=backgrounds.get(image);bedTex=cached.bed;floatTex=cached.mask;
+        state.bed=fitBed(image.width,image.height,state.w,state.h);
+        drops.length=0;
+      },
       drop(x, y, r, s) { if (drops.length < 96) drops.push([x, y, r, s]); },
       // One leaf, flower or rock from the painting (image px ellipse), turned by angle and moved by (dx, dy) screen px.
       floater(ix, iy, irx, iry, rot, angle, dx, dy, push, snowK = 1, wetKind = 1, pool = 0, seed = 0) {
@@ -678,6 +755,23 @@ void main(){
         b.vert(c[0][0], c[0][1], def.u0, def.v0, color, fog); b.vert(c[1][0], c[1][1], def.u1, def.v0, color, fog);
         b.vert(c[2][0], c[2][1], def.u1, def.v1, color, fog); b.vert(c[3][0], c[3][1], def.u0, def.v1, color, fog);
         b.ix.set([n, n + 1, n + 2, n, n + 2, n + 3], b.ni); b.ni += 6;
+      },
+      // A small grid lets leaf rims curl and stalks bend without moving the root.
+      plant(layer, def, x, y, angle, sx, sy, bend, leaf, unit, color = WHITE, fog) {
+        const b = batches[layer], cols = 8, rows = 6, n = b.nv;
+        const w = def.w / def.ppu * sx, h = def.h / def.ppu * sy, ca = Math.cos(angle), sa = Math.sin(angle);
+        b.ensure((cols + 1) * (rows + 1), cols * rows * 6);
+        for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) {
+          const u = i / cols, v = j / rows, lx = (u - .5) * 2, ly = (v - def.py) / Math.max(def.py, 1 - def.py);
+          let px = (u - def.px) * w, py = (v - def.py) * h;
+          if (leaf) { py += bend * lx * lx * (1 - .35 * ly * ly); px += bend * lx * ly * .35; }
+          else px += bend * Math.max(0, -ly) ** 2;
+          b.vert(x + px * ca - py * sa, y + px * sa + py * ca, def.u0 + u * (def.u1 - def.u0), def.v0 + v * (def.v1 - def.v0), color, fog, lx, ly, unit, leaf ? -1 : -2);
+        }
+        for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+          const a = n + j * (cols + 1) + i;
+          b.ix.set([a, a + 1, a + cols + 2, a, a + cols + 2, a + cols + 1], b.ni); b.ni += 6;
+        }
       },
       // Koi body strip along the posed spine; pose from PondCore.fishPose, k scales about (cx, cy) for depth.
       // light: { widths: body half-width / strip half-height per spine point, metal, gloss } for relighting.
@@ -704,9 +798,9 @@ void main(){
   }
 
   // Draw a koi sprite along a posed spine with Canvas 2D, one slice per segment.
-  function drawStrip2D(ctx, img, pose, s, cx, cy, k) {
-    const n = BODY.segments, hh = BODY.half * s * k, ppu = img.width / BODY.width;
-    for (let i = 0; i < n; i++) {
+  function drawStrip2D(ctx, img, pose, s, cx, cy, k, joinedTail = false) {
+    const n = BODY.segments, tailJoint = joinedTail ? 11 : n, hh = BODY.half * s * k, ppu = img.width / BODY.width;
+    for (let i = 0; i < tailJoint; i++) {
       const ax = cx + (pose[i * 4] - cx) * k, ay = cy + (pose[i * 4 + 1] - cy) * k, bx = cx + (pose[i * 4 + 4] - cx) * k, by = cy + (pose[i * 4 + 5] - cy) * k;
       const len = Math.hypot(bx - ax, by - ay), sx = (BODY.nose - (i + 1) * SEG_UNITS - BODY.left) * ppu, head = i === 0 ? 2 : 0;
       ctx.save(); ctx.translate(bx, by); ctx.rotate(Math.atan2(ay - by, ax - bx));
@@ -714,6 +808,14 @@ void main(){
       if (i === n - 1) ctx.drawImage(img, 0, 0, 2 * ppu, img.height, -2 * s * k, -hh, 2 * s * k + .4, hh * 2);
       ctx.restore();
     }
+    if (!joinedTail) return;
+    // Preview tails move as one membrane, keeping translucent pixels free of strip seams.
+    const ax = cx + (pose[tailJoint * 4] - cx) * k, ay = cy + (pose[tailJoint * 4 + 1] - cy) * k;
+    const bx = cx + (pose[n * 4] - cx) * k, by = cy + (pose[n * 4 + 1] - cy) * k;
+    const len = Math.hypot(ax - bx, ay - by), sourceWidth = (BODY.nose - tailJoint * SEG_UNITS - BODY.left) * ppu;
+    ctx.save(); ctx.translate(bx, by); ctx.rotate(Math.atan2(ay - by, ax - bx));
+    ctx.drawImage(img, 0, 0, sourceWidth, img.height, -2 * s * k, -hh, len + 2 * s * k + .6, hh * 2);
+    ctx.restore();
   }
 
   // ---------- Canvas 2D fallback ----------
@@ -724,6 +826,8 @@ void main(){
     for (const l of LAYERS) queue[l] = [];
     return {
       kind: '2d', ripples: false, sprites,
+      prepareBackground() {},
+      setBackground(image) { bedImage=image;state.bed=fitBed(image.width,image.height,state.w,state.h,false);rings.length=0; },
       resize(w, h, dpr) {
         Object.assign(state, { w, h, dpr: Math.min(dpr, 1.5) });
         canvas.width = Math.round(w * state.dpr); canvas.height = Math.round(h * state.dpr);
@@ -732,20 +836,35 @@ void main(){
       },
       imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); },
       setFish(i, sprite) { const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },
-      drop(x, y, r, s) { if (s > .05 && rings.length < 60) rings.push({ x, y, age: 0, max: 1 + Math.min(2, s * 3) }); },
+      drop(x, y, r, s) { if (s > .05 && rings.length < 2) rings.push({ x, y, age: 0, max: 1.2 }); },
       floater() {},
       sprite(layer, def, x, y, angle, sx, sy, color = WHITE) { if (layer !== 'shadow' && layer !== 'airShadow') queue[layer].push(['s', def, x, y, angle, sx, sy, color[3]]); },
+      plant(layer, def, x, y, angle, sx, sy, bend, leaf, unit, color = WHITE) {
+        queue[layer].push(['p', def, x, y, angle, sx, sy, bend, leaf, color[3]]);
+      },
       fish(layer, cell, pose, s, cx, cy, k, color = WHITE) { if (layer === 'under' && fishCanvases[cell]) queue[layer].push(['f', fishCanvases[cell], Float32Array.from(pose), s, cx, cy, k, color[3]]); },
-      render(time, dt) {
+      render(time, dt, env) {
         ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0); ctx.clearRect(0, 0, state.w, state.h);
         for (const l of LAYERS) {
           ctx.globalCompositeOperation = l === 'glow' ? 'lighter' : 'source-over';
           for (const q of queue[l]) {
             ctx.globalAlpha = q[q.length - 1];
-            if (q[0] === 's') {
+            if (q[0] === 's' || q[0] === 'p') {
               const [, def, x, y, angle, sx, sy] = q;
               ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.scale(sx / def.ppu, sy / def.ppu);
-              ctx.drawImage(def.canvas, -def.px * def.canvas.width, -def.py * def.canvas.height); ctx.restore();
+              if (l === 'plantShadow') ctx.filter = 'brightness(0) blur(2px)';
+              if (l === 'plants' && env) ctx.filter = `brightness(${env.bright * (1 - env.cloudCover * env.cloudShade)}) saturate(${env.sat})`;
+              if (q[0] === 'p') {
+                // Slice the cached painting for the same bending in the Canvas fallback.
+                const [, , , , , , , bend, leaf] = q, W = def.canvas.width, H = def.canvas.height;
+                for (let j = 0; j < 12; j++) {
+                  const v = (j + .5) / 12, ly = (v - def.py) / Math.max(def.py, 1 - def.py);
+                  const dx = leaf ? 0 : bend * def.ppu / sx * Math.max(0, -ly) ** 2;
+                  const dy = leaf ? bend * def.ppu / sy * .5 * (1 - .35 * ly * ly) : 0;
+                  ctx.drawImage(def.canvas, 0, H * j / 12, W, H / 12, -def.px * W + dx, H * j / 12 - def.py * H + dy, W, H / 12 + .7);
+                }
+              } else ctx.drawImage(def.canvas, -def.px * def.canvas.width, -def.py * def.canvas.height);
+              ctx.restore();
             } else drawStrip2D(ctx, q[1], q[2], q[3], q[4], q[5], q[6]);
           }
           queue[l].length = 0;

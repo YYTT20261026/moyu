@@ -18,6 +18,161 @@
   function weatherFromCode(code) { if ([71,73,75,77,85,86].includes(code)) return 'snow'; if (code >= 51) return 'rain'; if (code >= 2) return 'cloudy'; return 'sunny'; }
   const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  // Shoreline traced on the supplied 16:9 painting. Coordinates are normalized so the
+  // same map follows both the centred cover crop and the renderer's portrait rotation.
+  const mapPoint = ([x,y]) => [x/2048,y/1152];
+  const POND_MAP = {
+    width:2560,height:1440,
+    water:[
+      [0,567],[63,560],[148,513],[208,466],[241,407],[243,330],[226,289],[224,275],
+      [283,321],[329,337],[405,348],[459,331],[509,294],[535,231],[569,205],
+      [620,177],[686,181],[741,160],[794,166],[848,189],[898,192],[944,216],
+      [988,221],[1022,244],[1021,290],[1046,323],[1094,341],[1159,350],
+      [1234,337],[1282,294],[1311,240],[1334,198],[1365,150],[1375,80],[1350,0],
+      [2048,0],[2048,655],[1975,661],[1900,662],[1820,695],[1770,721],
+      [1705,730],[1644,724],[1590,733],[1555,767],[1523,810],[1452,842],
+      [1375,865],[1309,900],[1280,967],[1300,1045],[1260,1088],[1200,1075],
+      [1170,1070],[1135,1051],[1095,1053],[1070,1072],[1048,1110],[1040,1152],
+      [490,1152],[481,1120],[470,1090],[453,1050],[427,1033],[411,1065],
+      [370,1055],[322,1019],[314,982],[279,968],[273,938],[227,921],
+      [203,895],[152,887],[115,861],[82,832],[67,804],[33,770],[0,749]
+    ].map(mapPoint),
+    // The small moss-covered stone near the bottom is above water; pebbles seen
+    // through the water elsewhere are part of the pond bed and remain swimmable.
+    rocks:[[[954,1037],[968,1007],[1000,998],[1035,1006],[1061,1030],
+      [1066,1056],[1047,1078],[1009,1086],[974,1070]] .map(mapPoint)]
+  };
+  // Each seasonal painting has its own shoreline and emergent stones.
+  const seasonalMap = (water, rocks) => ({width:2560,height:1440,water:water.map(mapPoint),rocks:rocks.map(p=>p.map(mapPoint))});
+  const POND_MAPS = {
+    spring:POND_MAP,
+    summer:seasonalMap([
+      [0,595],[64,574],[150,566],[207,533],[232,477],[234,419],[214,373],[216,336],
+      [260,356],[347,371],[417,362],[467,336],[500,287],[509,241],[532,226],
+      [583,213],[635,233],[685,224],[723,181],[770,180],[807,168],[850,174],
+      [881,197],[934,213],[978,218],[1014,252],[1011,278],[1026,316],[1080,342],
+      [1157,350],[1223,340],[1270,310],[1297,246],[1327,195],[1359,163],[1384,103],[1370,0],
+      [2048,0],[2048,620],[1991,612],[1943,642],[1890,687],[1830,748],[1790,812],
+      [1728,829],[1656,825],[1594,814],[1519,850],[1475,842],[1420,864],[1370,901],
+      [1325,919],[1280,960],[1255,1005],[1250,1050],[1280,1110],[1210,1125],[1174,1152],
+      [1160,1123],[1110,1104],[1060,1081],[1002,1075],[962,1094],[945,1152],
+      [488,1152],[479,1110],[449,1090],[443,1060],[411,1050],[390,1020],
+      [360,1004],[351,978],[330,945],[279,929],[238,899],[210,893],[183,867],
+      [148,846],[100,821],[71,790],[38,765],[0,743]
+    ],[[[1535,695],[1559,651],[1610,626],[1682,624],[1741,644],[1785,692],
+      [1792,743],[1764,781],[1708,806],[1640,800],[1583,775],[1547,740]]]),
+    autumn:seasonalMap([
+      [0,530],[90,519],[178,486],[243,440],[265,390],[269,331],[240,287],
+      [274,303],[340,315],[421,316],[470,291],[513,246],[540,197],[601,169],
+      [665,166],[715,150],[757,154],[813,162],[844,182],[909,224],[948,223],
+      [980,238],[1019,242],[1042,265],[1060,307],[1105,326],[1188,338],
+      [1245,319],[1287,284],[1310,235],[1335,183],[1368,147],[1385,90],[1371,0],
+      [2048,0],[2048,640],[1980,640],[1935,662],[1885,685],[1845,728],
+      [1815,756],[1782,768],[1740,823],[1690,830],[1655,833],[1610,851],
+      [1590,886],[1536,921],[1472,940],[1415,979],[1368,1010],[1340,1062],
+      [1320,1110],[1300,1152],[1230,1152],[1203,1120],[1150,1100],[1095,1091],
+      [1040,1106],[1010,1152],[493,1152],[478,1110],[453,1075],[421,1054],
+      [398,1034],[370,1020],[350,985],[316,962],[280,945],[251,913],[200,906],
+      [162,882],[113,858],[80,817],[41,784],[0,765]
+    ],[[[1419,747],[1431,714],[1480,679],[1545,667],[1608,681],[1662,716],
+      [1687,756],[1681,792],[1651,823],[1593,842],[1520,831],[1468,804],[1430,779]]]),
+    winter:seasonalMap([
+      [0,521],[68,510],[140,481],[210,439],[241,385],[245,325],[221,279],
+      [268,305],[337,320],[415,326],[470,305],[507,265],[535,211],[574,185],
+      [626,168],[680,172],[727,153],[786,160],[830,173],[885,202],[941,221],
+      [980,221],[1020,244],[1026,284],[1050,316],[1104,339],[1176,346],
+      [1238,329],[1284,292],[1310,237],[1331,195],[1362,148],[1375,84],[1355,0],
+      [2048,0],[2048,588],[1990,595],[1944,622],[1908,647],[1890,689],
+      [1845,723],[1815,765],[1771,801],[1740,848],[1675,868],[1604,881],
+      [1510,867],[1448,896],[1380,919],[1322,946],[1272,984],[1260,1044],
+      [1275,1090],[1230,1130],[1250,1152],[1220,1126],[1180,1096],[1134,1082],[1080,1078],
+      [1022,1094],[994,1133],[982,1152],[488,1152],[478,1111],[450,1075],
+      [420,1037],[376,1012],[355,972],[318,954],[291,926],[258,912],[230,877],
+      [187,868],[159,847],[127,819],[88,788],[48,769],[0,758]
+    ],[[[1424,656],[1472,616],[1552,596],[1632,624],[1680,680],
+      [1664,744],[1592,780],[1496,776],[1428,736]],
+      [[1632,740],[1688,720],[1752,744],[1780,800],[1760,856],
+       [1688,880],[1632,852],[1608,796]]])
+  };
+  const SEASONS = {
+    spring:{name:'春',title:'春暖花开',image:'assets/pond.jpg',thumbnail:'assets/pond-spring-thumb.jpg',weather:'sunny'},
+    summer:{name:'夏',title:'绿荫盛夏',image:'assets/pond-summer.jpg',thumbnail:'assets/pond-summer-thumb.jpg',weather:'sunny'},
+    autumn:{name:'秋',title:'枫染清池',image:'assets/pond-autumn.jpg',thumbnail:'assets/pond-autumn-thumb.jpg',weather:'sunny'},
+    winter:{name:'冬',title:'白雪映池',image:'assets/pond-winter.jpg',thumbnail:'assets/pond-winter-thumb.jpg',weather:'snow'}
+  };
+  function polygonSample(points,x,y) {
+    let inside=false,best=Infinity,qx=0,qy=0,ex=0,ey=0;
+    for(let i=0,j=points.length-1;i<points.length;j=i++) {
+      const [ax,ay]=points[j],[bx,by]=points[i],dx=bx-ax,dy=by-ay;
+      if((ay>y)!==(by>y)&&x<(bx-ax)*(y-ay)/(by-ay)+ax)inside=!inside;
+      const t=clamp(((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1),0,1);
+      const px=ax+t*dx,py=ay+t*dy,d=(x-px)**2+(y-py)**2;
+      if(d<best){best=d;qx=px;qy=py;ex=dx;ey=dy;}
+    }
+    const d=Math.sqrt(best),sign=inside?1:-1;
+    if(d>1e-7)return {distance:d*sign,nx:(x-qx)/d*sign,ny:(y-qy)/d*sign};
+    // At the boundary itself, derive the inward normal using a nearby point.
+    const len=Math.hypot(ex,ey)||1,nx=-ey/len,ny=ex/len;
+    let side=false;
+    const px=x+nx*.1,py=y+ny*.1;
+    for(let i=0,j=points.length-1;i<points.length;j=i++) {
+      const [ax,ay]=points[j],[bx,by]=points[i];
+      if((ay>py)!==(by>py)&&px<(bx-ax)*(py-ay)/(by-ay)+ax)side=!side;
+    }
+    return {distance:0,nx:nx*(side?1:-1),ny:ny*(side?1:-1)};
+  }
+  class PondHabitat {
+    constructor(width,height,imageToScreen,map=POND_MAP) {
+      this.width=width;this.height=height;
+      const transform=points=>points.map(([u,v])=>imageToScreen(u*map.width,v*map.height));
+      this.water=transform(map.water);this.rocks=map.rocks.map(transform);
+    }
+    sample(x,y) {
+      let best=polygonSample(this.water,x,y);
+      for(const rock of this.rocks){const p=polygonSample(rock,x,y);p.distance=-p.distance;p.nx=-p.nx;p.ny=-p.ny;if(p.distance<best.distance)best=p;}
+      for(const p of [{distance:x,nx:1,ny:0},{distance:this.width-x,nx:-1,ny:0},
+        {distance:y,nx:0,ny:1},{distance:this.height-y,nx:0,ny:-1}])if(p.distance<best.distance)best=p;
+      return best;
+    }
+    contains(x,y,margin=0) { return Number.isFinite(x)&&Number.isFinite(y)&&this.sample(x,y).distance>=margin-1e-6; }
+    feedingTarget(x,y,margin) {
+      const target=this.project(x,y,margin);
+      if(!target)return null;
+      const d=Math.hypot(target[0]-x,target[1]-y),steps=Math.max(1,Math.ceil(d/4));
+      let clear=true;
+      for(let i=1;i<=steps;i++)if(!this.contains(x+(target[0]-x)*i/steps,y+(target[1]-y)*i/steps,4)){clear=false;break;}
+      if(clear)return target;
+      // In a narrow channel the nearest open water can lie across a stone.
+      // Find a straight route through water so pellets can actually drift there.
+      let best=null,waypoint=null,room=this.sample(x,y).distance+1,reach=Math.hypot(this.width,this.height);
+      for(let i=0;i<64;i++){
+        const a=i*TAU/64,dx=Math.cos(a),dy=Math.sin(a);
+        for(let r=4;r<reach;r+=4){
+          const px=x+dx*r,py=y+dy*r,p=this.sample(px,py);
+          if(p.distance<4)break;
+          if(p.distance>room){room=p.distance;waypoint=[px,py];}
+          if(p.distance>=margin){best=[px,py];reach=r;break;}
+        }
+      }
+      return best||waypoint;
+    }
+    project(x,y,margin=0) {
+      const ox=x,oy=y;
+      for(let i=0;i<40;i++){
+        const p=this.sample(x,y);if(p.distance>=margin)return [x,y];
+        const push=margin-p.distance+.5;x+=p.nx*push;y+=p.ny*push;
+      }
+      // Concave corners can have competing normals. Choose the nearest safe
+      // point in the visible water instead of ever falling back onto dry land.
+      let best=null,dist=Infinity;
+      const step=Math.max(12,Math.min(this.width,this.height)/24);
+      for(let py=margin;py<this.height-margin;py+=step)for(let px=margin;px<this.width-margin;px+=step){
+        const d=(px-ox)**2+(py-oy)**2;
+        if(d<dist&&this.contains(px,py,margin)){best=[px,py];dist=d;}
+      }
+      return best;
+    }
+  }
   function createFish(index, random = Math.random) {
     const names = ['锦时','小满','丹朱','听雨','白露','金盏','青禾','望舒','知秋','浮玉','映月','点绛','云游','春水','琥珀','松墨','桃夭','长安','涟漪','拾光','朝露','小暑','如意','团团'];
     return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, size: .62 + random() * .4, seed: Math.floor(random()*100000), eaten: 0, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
@@ -76,12 +231,38 @@
     return out;
   }
   class PondSimulation {
-    constructor(fish,width,height,random=Math.random,residents=[],residentsOn=true) { this.fish=fish; this.residents=residents; this.residentsOn=residentsOn; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; }
+    constructor(fish,width,height,random=Math.random,residents=[],residentsOn=true) { this.fish=fish; this.residents=residents; this.residentsOn=residentsOn; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; this.habitat=null; }
     get allFish() { return this.residentsOn?this.fish.concat(this.residents):this.fish; }
+    isWater(x,y,margin=0) { return this.habitat?this.habitat.contains(x,y,margin):x>=margin&&x<=this.width-margin&&y>=margin&&y<=this.height-margin; }
+    fishMargin(f) { return (Math.abs(BODY.tail)+BODY.half+7)*f.size*this.scale+5; }
+    feedingMargin() {
+      // Leave room for at least one koi to line up its mouth and turn around a
+      // pellet. Residents do not eat, so their size must not set this margin.
+      let margin=Infinity;
+      for(const f of this.fish){const s=f.size*this.scale; margin=Math.min(margin,this.fishMargin(f)+BODY.nose*s*.4+8);}
+      return Number.isFinite(margin)?Math.max(4,margin):4;
+    }
+    confineFish(f) {
+      if(!this.habitat||this.isWater(f.x*this.width,f.y*this.height,this.fishMargin(f)))return;
+      const p=this.habitat.project(f.x*this.width,f.y*this.height,this.fishMargin(f));
+      if(p){f.x=p[0]/this.width;f.y=p[1]/this.height;f.spine=null;f.goal=null;f.v=0;}
+    }
+    setHabitat(habitat) {
+      this.habitat=habitat;
+      for(const f of this.allFish){wake(f,this.random);this.confineFish(f);f.goal=null;f.spine=null;}
+      this.food=this.food.filter(p=>this.isWater(p.x,p.y,4));
+      for(const p of this.food)p.feedGoal=null;
+    }
     feed(x,y,count=9) {
-      if(this.food.length >= 180) return false;
-      for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24;this.food.push({x:clamp(x+Math.cos(a)*r,15,this.width-15),y:clamp(y+Math.sin(a)*r,15,this.height-15),life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});}
-      return true;
+      if(this.food.length >= 180||!this.isWater(x,y,4)) return false;
+      const before=this.food.length;
+      for(let i=0;i<count && this.food.length<180;i++){
+        const a=this.random()*TAU,r=Math.sqrt(this.random())*24;
+        let px=clamp(x+Math.cos(a)*r,4,this.width-4),py=clamp(y+Math.sin(a)*r,4,this.height-4);
+        if(!this.isWater(px,py,4)){px=x;py=y;}
+        this.food.push({x:px,y:py,life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});
+      }
+      return this.food.length>before;
     }
     // A tap without food startles nearby fish into a short dash away from it.
     scare(x,y,radius=170) {
@@ -89,16 +270,34 @@
     }
     pickGoal(f) {
       const r=this.random,w=this.width,h=this.height,m=.15,span=Math.min(w,h);let best=null,score=-Infinity;
-      for(let i=0;i<8;i++){const gx=m+r()*(1-2*m),gy=m+r()*(1-2*m),dx=(gx-f.x)*w,dy=(gy-f.y)*h,d=Math.hypot(dx,dy);if(this.obstacles.some(o=>Math.hypot(gx*w-o.x,gy*h-o.y)<o.r+40))continue;const sc=-Math.abs(wrap(Math.atan2(dy,dx)-f.angle))*1.2+Math.min(d,span*.6)/span*2+r()*.6;if(sc>score){score=sc;best={x:gx,y:gy};}}
-      f.goal=best||{x:.5,y:.5};f.goalTime=7+r()*12;
+      for(let i=0;i<(this.habitat?16:8);i++){const gx=m+r()*(1-2*m),gy=m+r()*(1-2*m),dx=(gx-f.x)*w,dy=(gy-f.y)*h,d=Math.hypot(dx,dy);if(!this.isWater(gx*w,gy*h,this.habitat?this.fishMargin(f):0)||this.obstacles.some(o=>Math.hypot(gx*w-o.x,gy*h-o.y)<o.r+40))continue;const sc=-Math.abs(wrap(Math.atan2(dy,dx)-f.angle))*1.2+Math.min(d,span*.6)/span*2+r()*.6;if(sc>score){score=sc;best={x:gx,y:gy};}}
+      f.goal=best||{x:f.x,y:f.y};f.goalTime=7+r()*12;
     }
     step(dt,speedFactor=1) {
       dt=clamp(dt,0,.05);this.time+=dt;const w=this.width,h=this.height;
-      for(const p of this.food){p.life-=dt;p.age+=dt;const k=Math.exp(-dt*1.8);p.vx*=k;p.vy*=k;p.x=clamp(p.x+(p.vx+Math.sin(this.time*.35+p.drift)*1.2)*dt,8,w-8);p.y=clamp(p.y+(p.vy+Math.cos(this.time*.29+p.drift*1.3)*1.2)*dt,8,h-8);}
-      this.food=this.food.filter(p=>p.life>0&&!p.eaten);
+      const feedingMargin=this.feedingMargin();
+      for(const p of this.food){
+        p.life-=dt;p.age+=dt;const k=Math.exp(-dt*1.8);p.vx*=k;p.vy*=k;
+        let vx=p.vx+Math.sin(this.time*.35+p.drift)*1.2,vy=p.vy+Math.cos(this.time*.29+p.drift*1.3)*1.2;
+        // Pellets near a rock float gently toward a place where a koi can get
+        // its mouth to them while its entire body remains in the water.
+        if(this.habitat&&!this.isWater(p.x,p.y,feedingMargin)){
+          if(p.feedGoal&&Math.hypot(p.feedGoal[0]-p.x,p.feedGoal[1]-p.y)<3)p.feedGoal=null;
+          const target=p.feedGoal||(p.feedGoal=this.habitat.feedingTarget(p.x,p.y,feedingMargin));
+          if(target){const dx=target[0]-p.x,dy=target[1]-p.y,d=Math.hypot(dx,dy)||1,speed=Math.min(45*this.scale,d*3);vx+=dx/d*speed;vy+=dy/d*speed;}
+        }else p.feedGoal=null;
+        const px=clamp(p.x+vx*dt,4,w-4),py=clamp(p.y+vy*dt,4,h-4);
+        if(this.isWater(px,py,4)){p.x=px;p.y=py;}else{
+          // Slide along a curved bank rather than freezing on its first corner.
+          const safe=this.habitat?.project(px,py,4.5);
+          if(safe&&Math.hypot(safe[0]-p.x,safe[1]-p.y)<=Math.max(2,Math.hypot(vx,vy)*dt*2)){p.x=safe[0];p.y=safe[1];}
+          p.vx=p.vy=0;p.feedGoal=null;
+        }
+      }
+      this.food=this.food.filter(p=>p.life>0&&!p.eaten&&this.isWater(p.x,p.y,4));
       const sdt=dt*clamp(speedFactor,.1,3);
       const neighbours=this.allFish;
-      for(const f of neighbours)wake(f,this.random);
+      for(const f of neighbours){wake(f,this.random);this.confineFish(f);}
       for(const f of neighbours)this.swim(f,sdt,neighbours);
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
     }
@@ -144,6 +343,13 @@
       if(lx<mX)bx=(mX-lx)/mX;else if(lx>w-mX)bx=(w-mX-lx)/mX;
       if(ly<mY)by=(mY-ly)/mY;else if(ly>h-mY)by=(h-mY-ly)/mY;
       for(const ob of this.obstacles)for(const [px,py,R] of [[lx,ly,ob.r+L*.4],[x,y,ob.r+L*.2]]){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1;if(d<R){const k=(1-d/R)*2.5;bx+=dx/d*k;by+=dy/d*k;}}
+      if(this.habitat){
+        const edge=this.habitat.sample(x,y),ahead=this.habitat.sample(x+cos*Math.max(L,f.v*.5),y+sin*Math.max(L,f.v*.5)),margin=this.fishMargin(f);
+        const near=clamp((margin+L*.8-edge.distance)/(L*.8),0,1),risk=clamp((margin+L*.4-ahead.distance)/L,0,2);
+        const approaching=food&&f.flee<=0,avoid=approaching?.18:1;
+        bx+=(edge.nx*near*2+ahead.nx*risk*2)*avoid;by+=(edge.ny*near*2+ahead.ny*risk*2)*avoid;
+        boundW=Math.max(boundW,approaching?.8:3);if(near>.5){turnGain=Math.max(turnGain,6);maxTurn=Math.max(maxTurn,4);want*=approaching?.8:.45;}
+      }
       const desired=Math.atan2(gy+sy*sepW+ay*.15+by*boundW,gx+sx*sepW+ax*.15+bx*boundW);
       f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
       f.angle=wrap(f.angle+f.turn*dt);
@@ -157,9 +363,22 @@
       f.phase=(f.phase+dt*TAU*(silver?1.22:1)*(.45+f.thrust*(1.1+1.3*Math.min(2.5,bl))+Math.abs(f.turn)*.35))%(TAU*1000);
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*3);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
-      f.x=clamp(x/w,.03,.97);f.y=clamp(y/h,.035,.965);
+      if(this.habitat&&!this.isWater(x,y,this.fishMargin(f))){
+        const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY);
+        x=oldX;y=oldY;f.v*=.45;
+        f.angle=wrap(f.angle+clamp(wrap(Math.atan2(edge.ny,edge.nx)-f.angle),-dt*7,dt*7));f.goal=null;
+      }
+      f.x=this.habitat?x/w:clamp(x/w,.03,.97);f.y=this.habitat?y/h:clamp(y/h,.035,.965);
       f.depth+=(f.depthGoal-f.depth)*Math.min(1,dt*(food?1.2:.35));
       updateSpine(f,s,w,h);
+      // A very tight turn can swing the following tail out farther than the head.
+      // Keep the full posed strip (including fins and tail beat) in the water.
+      if(this.habitat){
+        const pose=fishPose(f,s),padding=BODY.half*s+5;
+        for(let i=0;i<pose.length;i+=4)if(!this.isWater(pose[i],pose[i+1],padding)){
+          f.spine=null;updateSpine(f,s,w,h);break;
+        }
+      }
     }
   }
   function sanitizeSave(data) {
@@ -170,7 +389,7 @@
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
-  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -25,6 +25,7 @@ namespace BichiPond
         private CoreWebView2Environment env;
         private InteractiveForm window;
         private bool userPaused, locked, rebuilding, quitting, soundOn;
+        private string season = "spring";
         private string weather = "sunny";
         private bool night;
         // Taps on the desktop, seen through a low-level mouse hook (the desktop icons layer takes the real clicks).
@@ -63,7 +64,7 @@ namespace BichiPond
             try { runtime = CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch (WebView2RuntimeNotFoundException) { }
             if (string.IsNullOrEmpty(runtime))
             {
-                if (MessageBox.Show("碧池观鱼需要 Microsoft Edge WebView2 运行时（Windows 11 自带，Windows 10 多数已通过更新安装）。\n\n现在打开下载页面吗？", "碧池观鱼", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                if (MessageBox.Show("摸鱼需要 Microsoft Edge WebView2 运行时（Windows 11 自带，Windows 10 多数已通过更新安装）。\n\n现在打开下载页面吗？", "摸鱼", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     PondPage.OpenInBrowser("https://developer.microsoft.com/microsoft-edge/webview2/");
                 ExitThread();
                 return;
@@ -114,6 +115,8 @@ namespace BichiPond
         {
             string call = "window.__pondSync&&__pondSync(" + PondPage.JsString(json) + ")";
             foreach (var v in Views) if (v != from) _ = v.CoreWebView2.ExecuteScriptAsync(call);
+            var se = Regex.Match(json, "\"season\":\"(\\w+)\"");
+            if (se.Success) season = se.Groups[1].Value;
             var w = Regex.Match(json, "\"weather\":\"(\\w+)\"");
             if (w.Success) weather = w.Groups[1].Value;
             var n = Regex.Match(json, "\"night\":(true|false)");
@@ -200,18 +203,23 @@ namespace BichiPond
         {
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond"), log = Path.Combine(dir, "error.log");
             try { Directory.CreateDirectory(dir); File.AppendAllText(log, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what} (Windows {Environment.OSVersion.Version})\r\n{ex}\r\n\r\n"); } catch (Exception) { }
-            MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "碧池观鱼", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "摸鱼", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // ---------- tray ----------
         private void BuildTray()
         {
             tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            tray.Text = "碧池观鱼";
+            tray.Text = "摸鱼";
             var menu = new ContextMenuStrip();
-            menu.Items.Add(new ToolStripMenuItem("碧池观鱼") { Enabled = false });
+            menu.Items.Add(new ToolStripMenuItem("摸鱼") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开交互窗口", null, (s, e) => OpenWindow());
+            // Four seasons first, then the weather that can be layered on top of each.
+            var seasonMenu = new ToolStripMenuItem("四季");
+            foreach (var (name, value) in new[] { ("春 · 春暖花开", "spring"), ("夏 · 绿荫盛夏", "summer"), ("秋 · 枫染清池", "autumn"), ("冬 · 白雪映池", "winter") })
+                seasonMenu.DropDownItems.Add(new ToolStripMenuItem(name, null, (s, e) => { season = value; Command($"{{season:'{value}'}}"); }) { Tag = value });
+            menu.Items.Add(seasonMenu);
             var weatherMenu = new ToolStripMenuItem("天气");
             foreach (var (name, value) in new[] { ("晴日", "sunny"), ("多云", "cloudy"), ("下雨", "rain"), ("落雪", "snow") })
                 weatherMenu.DropDownItems.Add(new ToolStripMenuItem(name, null, (s, e) => { weather = value; Command($"{{weather:'{value}'}}"); }) { Tag = value });
@@ -228,9 +236,10 @@ namespace BichiPond
             var startup = new ToolStripMenuItem("开机时启动", null, (s, e) => SetStartup(!IsStartup()));
             menu.Items.Add(startup);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出碧池观鱼", null, (s, e) => Quit());
+            menu.Items.Add("退出摸鱼", null, (s, e) => Quit());
             menu.Opening += (s, e) =>
             {
+                foreach (ToolStripItem i in seasonMenu.DropDownItems) if (i is ToolStripMenuItem mi && mi.Tag is string v) mi.Checked = v == season;
                 foreach (ToolStripItem i in weatherMenu.DropDownItems) if (i is ToolStripMenuItem mi && mi.Tag is string v) mi.Checked = v == weather;
                 nightItem.Checked = night; pause.Checked = userPaused; startup.Checked = IsStartup(); soundItem.Checked = soundOn;
             };

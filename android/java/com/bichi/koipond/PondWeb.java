@@ -68,7 +68,7 @@ final class PondWeb {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try { context.startActivity(pick); return; } catch (Exception ignored) { }
         try { context.startActivity(new Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return; } catch (Exception ignored) { }
-        Toast.makeText(context, "请在系统「壁纸」设置中选择动态壁纸「碧池观鱼」", Toast.LENGTH_LONG).show();
+        Toast.makeText(context, "请在系统「壁纸」设置中选择动态壁纸「摸鱼」", Toast.LENGTH_LONG).show();
     }
 
     /** window.PondHost in the page. Calls arrive on a WebView thread; everything is done on the main thread. */

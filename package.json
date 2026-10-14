@@ -2,7 +2,7 @@
   "name": "bichi-koi-pond",
   "version": "1.0.0",
   "private": true,
-  "description": "碧池观鱼 · 可交互的锦鲤池塘动态壁纸",
+  "description": "摸鱼 · 可交互的锦鲤池塘动态壁纸",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",

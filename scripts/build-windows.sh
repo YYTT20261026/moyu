@@ -9,7 +9,7 @@ DOTNET="${DOTNET:-$(command -v dotnet || echo "$HOME/.dotnet/dotnet")}"
 VERSION="1.2.1"
 PROJ="$ROOT/native/windows"
 OUT="$ROOT/build/windows/BichiPond"
-ZIP="$ROOT/dist/碧池观鱼-Windows-$VERSION.zip"
+ZIP="$ROOT/dist/摸鱼-Windows-$VERSION.zip"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -39,7 +39,7 @@ rm -f "$OUT"/*.pdb "$OUT"/*.xml
 [[ -d "$OUT/runtimes" ]] && find "$OUT/runtimes" -mindepth 1 -maxdepth 1 ! -name 'win-x64' ! -name 'win-x86' ! -name 'win-arm64' -exec rm -rf {} +
 
 cat > "$OUT/README.txt" <<'TXT'
-碧池观鱼 · Windows 桌面动态壁纸
+摸鱼 · Windows 桌面动态壁纸
 
 使用：解压整个文件夹（不要只拿出 exe），双击 BichiPond.exe，池塘即铺满每块屏幕的桌面背景，
 位于桌面图标之下，不影响正常使用桌面。

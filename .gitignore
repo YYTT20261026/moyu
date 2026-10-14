@@ -6,7 +6,13 @@ android/build/
 android/assets/
 native/windows/bin/
 native/windows/obj/
+**/bin/
+**/obj/
 # Local tools and system files
 .claude/
+.build-tools/
+.manus/
+.work/
 node_modules/
 .DS_Store
+native/windows/installer/payload.zip

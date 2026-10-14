@@ -88,7 +88,7 @@ namespace BichiPond
             Bounds = screen.Bounds;
             BackColor = PondPage.Backdrop;
             AutoScaleMode = AutoScaleMode.None; // sizes are the screen's real pixels, never rescaled
-            Text = "碧池观鱼 Wallpaper";
+            Text = "摸鱼 Wallpaper";
         }
 
         /// <summary>Last pause state sent to the page, so it is only told when that changes.</summary>
@@ -131,7 +131,7 @@ namespace BichiPond
 
         public InteractiveForm()
         {
-            Text = "碧池观鱼";
+            Text = "摸鱼";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             BackColor = PondPage.Backdrop;
             StartPosition = FormStartPosition.CenterScreen;

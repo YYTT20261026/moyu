@@ -18,7 +18,8 @@ cd "$ROOT/android"
 # Package the current pond, never a stale copy: assets/ is rebuilt from the web sources every time.
 rm -rf assets && mkdir -p assets/assets
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do cp "$ROOT/$f" assets/; done
-cp "$ROOT/assets/pond.jpg" "$ROOT/assets/pond-data.js" "$ROOT/assets/favicon.svg" assets/assets/
+cp "$ROOT"/assets/pond*.jpg "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/favicon.svg" assets/assets/
+cp -R "$ROOT/assets/audio" assets/assets/
 
 # Keep the signing key between builds, so a new APK installs over the old one without losing the pond.
 [[ -f build/bichi.keystore ]] && cp build/bichi.keystore "$ROOT/android/.bichi.keystore.keep"
@@ -38,7 +39,7 @@ if [[ ! -f build/bichi.keystore ]]; then
     -validity 10000 -storepass bichipond -keypass bichipond -dname "CN=Bichi Koi Pond" 2>/dev/null
 fi
 "$BT/apksigner" sign --ks build/bichi.keystore --ks-pass pass:bichipond --key-pass pass:bichipond \
-  --out "build/碧池观鱼.apk" build/aligned.apk
+  --out "build/摸鱼.apk" build/aligned.apk
 "$BT/apksigner" verify "build/碧池观鱼.apk"
-mkdir -p "$ROOT/dist" && cp "build/碧池观鱼.apk" "$ROOT/dist/碧池观鱼.apk"
-echo "✓ build/碧池观鱼.apk ($(du -h "build/碧池观鱼.apk" | cut -f1)), also at dist/碧池观鱼.apk — transfer to a phone and install"
+mkdir -p "$ROOT/dist" && cp "build/摸鱼.apk" "$ROOT/dist/摸鱼.apk"
+echo "✓ build/摸鱼.apk ($(du -h "build/摸鱼.apk" | cut -f1)), also at dist/摸鱼.apk — transfer to a phone and install"

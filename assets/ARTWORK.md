@@ -1,10 +1,21 @@
 # 池塘美术来源
 
-- 工具：Codex 内置 imagegen（未使用 API / CLI 回退）
-- 输出：`assets/pond.png`（原图）；运行时使用压缩后的 `assets/pond.jpg` 及其内嵌版本 `assets/pond-data.js`
-- 用途：锦鲤池塘的静态水底、荷叶与荷花背景；锦鲤、乌龟、蝴蝶等贴图由 `art.js` 程序化绘制，水波、焦散与天气由 WebGL 着色器生成。
-- 未使用视频截图或原作者的素材作为生成输入。
+- 春季底图：用户提供的鱼池插画，2560×1440；保存为 `assets/pond.png`；按用户要求用本地 OpenCV 图像修补减少水面的散落花朵，岸线和石头像素保持原样。
+- 夏、秋、冬底图：用户提供的 `koi-pond-summer.png`、`koi-pond-autumn.png`、`koi-pond-winter.png`，均为 2560×1440；压缩为对应的 `assets/pond-<季节>.jpg`，保留原图构图。
+- 网页使用压缩后的 JPG；`assets/pond-data.js` 内嵌四季底图，支持离线直接打开 HTML 和 WebGL 读取像素。
+- 天气面板使用 320×180 的 `assets/pond-<季节>-thumb.jpg` 缩略图，避免为预览重复解码完整图片。后台分时准备其他季节的底图与纹理，切换时复用渲染缓冲区。
+- 四季水面的大量独立圆形涟漪按用户要求清理，每张保留两处主要涟漪；用附近平静水面的笔触恢复局部纹理，并保留原有水色和光照。编辑遮罩限定在水域内，保护岸线、石头及漂浮花叶；运行底图、季节缩略图和离线内嵌版本同步更新。动态水波最多接受两处短暂扰动，减弱强度并加快衰减；植物仍响应投喂和雨滴。
+- 四季原画左中偏下有一片偏暗的深水阴影，按用户要求抬亮为与池中央一致的青绿色。抬亮只作用于岸边遮罩内的水域（原图直方图较暗的部分），保留水面纹理、深度层次以及所有水下卵石、岸线和石头像素；逐季生成 `output/pond-<季节>-lifted.jpg` 后回填底图。修改前的原图另存为 `output/pond*.before-lift.jpg`。
+- 四季岸线和露出水面的石头在 `core.js` 的 `POND_MAPS` 中分别以归一化坐标标注，`POND_MAP` 为春季兼容别名。水下卵石属于可游动水域。
+- 鱼的活动、鱼食散落和漂移、点击投喂，以及岸边的水面渲染共用这份边界；通过渲染器的 `imageToScreen` 跟随窗口裁切和竖屏旋转。
+- 花朵、花瓣和螃蟹栖息位置在 `scene.js` 中按当前底图重新标注。
+- 水面独立漂浮的花朵、花瓣与落叶从四季原画按水域遮罩提取，保存为透明图集 `drifting-flora.png`，裁切位置和原画坐标见 `drifting-flora.json`。移走后露出的底色使用局部 OpenCV 修补，遮罩保护岸线和露出的石头；季节缩略图保留花叶构图。图集与坐标内嵌到 `pond-data.js`，启动时仅解码一次并复用现有精灵图集。漂移与旋转使用四季对应的水域边界，原地不再重复绘制已提取的花叶。
+- 锦鲤、乌龟、蝴蝶等贴图由 `art.js` 程序绘制，水波、焦散与天气由 WebGL 着色器生成。
+- 左下角荷花丛复用项目原版 `abb8370` 中的 `assets/pond.png`：从原画裁出荷叶、荷花和花苞，去除周围水面，保存为透明图集 `assets/lotus-original.png`。秋季黄叶、冬季枯叶由原荷叶调整颜色与轮廓得到；莲蓬和枯梗由程序绘制。
+- 荷花图集随底图一起内嵌，启动时仅解码、上传一次；四季切换复用同一贴图，不额外加载图片。
+- 原版植物保留裁出的轮廓，在 `art.js` 中一次性重绘为青绿、黄褐的色块、淡叶脉和柔和笔触，去掉照片式纹理；荷叶和花瓣补画少量透明水珠、接触阴影和细小高光，水珠随植物网格一起起伏。花瓣统一为柔和粉色、暖白高光，荷花补画花茎。独立植物绘制层与鱼池共用天气明暗、云影、天空色和暗角，并绘制贴近水面的接触阴影。
+- 荷叶采用细分网格，读取水面同一份波纹和风浪斜率，叶缘局部起伏且高光随倾斜变化；花茎与莲蓬以根部为支点弯摆。投食、鱼的水纹和雨滴会产生带传播延迟的弹性晃动，随后自然衰减。植物摆动预留水域边界，四季切换清除旧的晃动；Canvas 后备模式也保留摆动和弯曲。
 
-## 最终生成提示词
+天气面板可选择春、夏、秋、冬。季节切换会更换底图、水域边界、花朵与螃蟹栖息位置，使用对应天气预设；晴雨、雨雪量和夜色仍可单独调整。季节选择随其他池塘设置保存在设备上。
 
-Use case: stylized-concept. Asset type: full-screen landscape 16:9 background for an interactive top-down koi pond desktop wallpaper. Create an exquisite tranquil shallow Chinese garden pond seen from PERFECTLY VERTICAL OVERHEAD, orthographic view. Wide 16:9 image. Soft pale jade-green translucent water, beautiful natural fine mottled sand and blue-grey stones visible underwater, subtle caustic sun patterns and organic moss textures. A few natural clusters of olive green lily pads and delicate pale pink lotus blossoms hugging the far left lower corner and right edges, small submerged rocks around perimeter. Center 75% is open pale green water with understated underwater texture to clearly show animated fish added later. Quiet, painterly naturalistic game art with rich detail, restrained muted jade and sage palette, soft warm afternoon light, refined East Asian atmosphere. No fish, no turtles, no butterflies, no animals, no text, no UI, no borders, no people, no perspective horizon, no large foreground objects. Fill every pixel with pond, no dry land. 2560x1440 landscape composition.
+替换底图或改变构图时，请同步更新 `POND_MAPS` 与 `scene.js` 中的季节标注，再运行 `npm run build` 生成内嵌图片和静态网页。

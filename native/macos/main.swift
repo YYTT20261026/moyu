@@ -74,9 +74,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var settingsView: WKWebView?
   private var statusItem: NSStatusItem?
   private var refresh: Timer?
+  private var screenSignature = ""
+  private var rebuildWork: DispatchWorkItem?
   private var userPaused = false
   private var screensAsleep = false
-  // Latest weather and night the pond reported, for the menu's check marks.
+  // Latest season, weather and night the pond reported, for the menu's check marks.
+  private var season = "spring"
   private var weather = "sunny"
   private var night = false
 
@@ -97,12 +100,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Follow the cursor as it moves, so a control takes a click the moment the pointer reaches it.
     // (Watching mouse movement needs no special permission, unlike watching keys.)
     mouseMonitors = [
-      NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in self?.pumpMouse() } as Any,
+      NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown]) { [weak self] event in
+        if event.type == .leftMouseDown { self?.handleDesktopClick(at: NSEvent.mouseLocation) }
+        else { self?.pumpMouse() }
+      } as Any,
       NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] e in self?.pumpMouse(); return e } as Any,
     ]
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-    ) { [weak self] _ in self?.rebuildWallpaper() }
+    ) { [weak self] _ in self?.requestWallpaperRebuildIfNeeded() }
     // Nobody sees the pond while the displays sleep or another user is logged in: stop drawing it.
     let ws = NSWorkspace.shared.notificationCenter
     for (name, asleep) in [
@@ -170,6 +176,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
+  // A desktop click does not reach a window that intentionally ignores mouse events. The global monitor
+  // observes it without consuming it, so Finder and the foreground application keep their normal click;
+  // the pond receives the same point as a tap and decides whether it is water, a rock, or the bank.
+  private func handleDesktopClick(at mouse: NSPoint) {
+    guard settingsWindow == nil else { return }
+    // The monitor also sees clicks inside other applications. Only Finder's desktop is a
+    // wallpaper surface; never turn a click in Chrome, an editor, or another app into fish food.
+    guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
+    for pane in wallpaper where pane.screen.frame.contains(mouse) && !pane.modal {
+      if pane.rects.contains(where: { $0.contains(mouse) }) { return }
+      let frame = pane.screen.frame
+      let x = mouse.x - frame.minX, y = frame.maxY - mouse.y
+      pane.webView.callAsyncJavaScript(
+        "window.pondTap && pondTap(x, y)", arguments: ["x": x, "y": y], in: nil, in: .page,
+        completionHandler: nil)
+      return
+    }
+  }
+
   // While a panel is open the wallpaper is lifted above the desktop icons and made key, so every field,
   // slider and menu in it works with the real mouse and keyboard (input methods included); closing the panel
   // sets it back on the desktop.
@@ -215,6 +240,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   private func rebuildWallpaper() {
+    rebuildWork?.cancel()
+    rebuildWork = nil
+    screenSignature = Self.currentScreenSignature()
     refresh?.invalidate()
     for pane in wallpaper { pane.overlay.close(); pane.window.close() }
     wallpaper.removeAll()
@@ -229,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       window.backgroundColor = .black
       window.hasShadow = false
       window.ignoresMouseEvents = true
-      window.title = "碧池观鱼 Wallpaper"
+      window.title = "摸鱼 Wallpaper"
       let view = newWebView(dockInset: dockInset(for: screen))
       window.contentView = view
       window.orderFrontRegardless()
@@ -244,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       overlay.hasShadow = false
       overlay.ignoresMouseEvents = true
       overlay.acceptsMouseMovedEvents = true
-      overlay.title = "碧池观鱼 Controls"
+      overlay.title = "摸鱼 Controls"
       let catcher = ClickCatcher(frame: NSRect(origin: .zero, size: screen.frame.size))
       catcher.target = view
       catcher.onRelease = { [weak self] in
@@ -257,6 +285,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     refresh = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
       self?.refreshRects()
     }
+  }
+
+  private static func currentScreenSignature() -> String {
+    NSScreen.screens.map { screen in
+      let f = screen.frame, id = (screen.deviceDescription[ NSDeviceDescriptionKey("NSScreenNumber") ] as? NSNumber)?.intValue ?? 0
+      return "\(id):\(f.origin.x),\(f.origin.y),\(f.size.width),\(f.size.height),\(screen.backingScaleFactor)"
+    }.sorted().joined(separator: "|")
+  }
+
+  private func requestWallpaperRebuildIfNeeded() {
+    let signature = Self.currentScreenSignature()
+    guard signature != screenSignature else { return }
+    rebuildWork?.cancel()
+    var work: DispatchWorkItem!
+    work = DispatchWorkItem { [weak self] in
+      guard let self, !work.isCancelled, Self.currentScreenSignature() != self.screenSignature else { return }
+      self.rebuildWallpaper()
+    }
+    rebuildWork = work
+    // Display changes can arrive as a burst while a monitor or the Dock is settling. Rebuild once,
+    // after the final geometry is stable, instead of flashing the desktop on every notification.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
   }
 
   private func reloadWallpaper() {
@@ -281,6 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       view.callAsyncJavaScript(
         "window.pondControl && pondControl.set(o)", arguments: ["o": options], in: nil, in: .page, completionHandler: nil)
     }
+    if let s = options["season"] as? String { season = s }
     if let w = options["weather"] as? String { weather = w }
     if let n = options["night"] as? Bool { night = n }
   }
@@ -292,7 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let main = NSMenu()
     let appItem = NSMenuItem()
     let appMenu = NSMenu()
-    appMenu.addItem(withTitle: "退出碧池观鱼", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    appMenu.addItem(withTitle: "退出摸鱼", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     appItem.submenu = appMenu
     main.addItem(appItem)
     let editItem = NSMenuItem()
@@ -315,18 +366,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     NSApp.mainMenu = main
   }
 
-  private enum Tag: Int { case weather = 100, night, pause, login }
+  private enum Tag: Int { case season = 90, weather = 100, night, pause, login }
 
   private func buildStatusItem() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     item.button?.title = "🐟"
     let menu = NSMenu()
     menu.delegate = self
-    let title = NSMenuItem(title: "碧池观鱼", action: nil, keyEquivalent: "")
+    let title = NSMenuItem(title: "摸鱼", action: nil, keyEquivalent: "")
     title.isEnabled = false
     menu.addItem(title)
     menu.addItem(.separator())
     menu.addItem(menuItem("打开交互窗口", #selector(openInteractive), "i"))
+    // Four seasons first, then the weather that can be layered on top of each.
+    let seasonMenu = NSMenu()
+    for (name, value) in [("春 · 春暖花开", "spring"), ("夏 · 绿荫盛夏", "summer"), ("秋 · 枫染清池", "autumn"), ("冬 · 白雪映池", "winter")] {
+      let s = menuItem(name, #selector(pickSeason(_:)), "")
+      s.representedObject = value
+      s.tag = Tag.season.rawValue
+      seasonMenu.addItem(s)
+    }
+    let seasonItem = NSMenuItem(title: "四季", action: nil, keyEquivalent: "")
+    seasonItem.submenu = seasonMenu
+    menu.addItem(seasonItem)
     let weatherMenu = NSMenu()
     for (name, value) in [("晴日", "sunny"), ("多云", "cloudy"), ("下雨", "rain"), ("落雪", "snow")] {
       let w = menuItem(name, #selector(pickWeather(_:)), "")
@@ -351,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       menu.addItem(login)
     }
     menu.addItem(.separator())
-    menu.addItem(menuItem("退出碧池观鱼", #selector(quitApp), "q"))
+    menu.addItem(menuItem("退出摸鱼", #selector(quitApp), "q"))
     item.menu = menu
     statusItem = item
   }
@@ -366,6 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func mark(_ items: [NSMenuItem]) {
       for item in items {
         switch Tag(rawValue: item.tag) {
+        case .season: item.state = (item.representedObject as? String) == season ? .on : .off
         case .weather: item.state = (item.representedObject as? String) == weather ? .on : .off
         case .night: item.state = night ? .on : .off
         case .pause: item.state = userPaused ? .on : .off
@@ -383,6 +446,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if let value = sender.representedObject as? String { control(["weather": value]) }
   }
 
+  @objc private func pickSeason(_ sender: NSMenuItem) {
+    if let value = sender.representedObject as? String { control(["season": value]) }
+  }
+
   @objc private func toggleNight() { control(["night": !night]) }
 
   @objc private func togglePause() {
@@ -398,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     } catch {
       let alert = NSAlert()
       alert.messageText = "无法更改登录项"
-      alert.informativeText = "请在“系统设置 › 通用 › 登录项”中手动添加碧池观鱼。\n\(error.localizedDescription)"
+      alert.informativeText = "请在“系统设置 › 通用 › 登录项”中手动添加摸鱼。\n\(error.localizedDescription)"
       alert.runModal()
     }
   }
@@ -415,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
-    window.title = "碧池观鱼"
+      window.title = "摸鱼"
     window.minSize = NSSize(width: 420, height: 560)
     window.delegate = self
     window.center()
@@ -445,6 +512,7 @@ extension AppDelegate: WKScriptMessageHandler {
       let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let settings = root["settings"] as? [String: Any]
     {
+      if let s = settings["season"] as? String { season = s }
       if let w = settings["weather"] as? String { weather = w }
       if let n = settings["night"] as? Bool { night = n }
     }
@@ -457,6 +525,7 @@ extension AppDelegate: WKNavigationDelegate {
     if (userPaused || screensAsleep) && wallpaper.contains(where: { $0.webView === webView }) { applyPause() }
     webView.evaluateJavaScript("window.pondControl && pondControl.state()") { [weak self] result, _ in
       guard let state = result as? [String: Any] else { return }
+      if let s = state["season"] as? String { self?.season = s }
       if let w = state["weather"] as? String { self?.weather = w }
       if let n = state["night"] as? Bool { self?.night = n }
     }
