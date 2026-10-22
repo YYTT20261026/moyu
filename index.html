@@ -12,9 +12,11 @@
   <script src="art.js" defer></script>
   <script src="gl.js" defer></script>
   <script src="scene.js" defer></script>
-  <script src="assets/audio-data.js" defer></script>
+  <script>/* Same for the recordings: a panel has no sound of its own. */
+    if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/audio-data.js" defer><\/script>');</script>
   <script src="audio.js" defer></script>
-  <script src="assets/pond-data.js" defer></script>
+  <script>/* The panel window shows a panel only, so its 6 MB water map is skipped: it makes the first tap open sooner. */
+    if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-data.js" defer><\/script>');</script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -25,7 +27,7 @@
     <div class="vignette" aria-hidden="true"></div>
     <canvas id="labels" aria-hidden="true"></canvas>
     <aside class="weather-card ui" aria-label="池塘显示与控制">
-      <div class="weather-top"><span id="weather-location">池畔时光</span><button class="icon-button" data-panel="settings" aria-label="池塘设置" title="池塘设置" data-icon="sliders"></button></div>
+      <div class="weather-top"><span id="weather-location">池畔时光</span><button id="card-toggle" class="icon-button" aria-label="收起卡片" aria-expanded="true" title="收起卡片" data-icon="collapse"></button><button class="icon-button" data-panel="settings" aria-label="池塘设置" title="池塘设置" data-icon="sliders"></button></div>
       <time id="clock">--:--</time><div id="calendar"></div>
       <div class="season-label" id="season-label">春暖花开</div>
       <div class="weather-line"><span id="weather-symbol" data-icon="sun"></span><strong id="weather-label">晴日</strong><span id="temperature">随心天气</span></div>
@@ -33,7 +35,6 @@
       <nav class="dock" aria-label="池塘工具">
         <button id="feed-button" class="dock-button active" aria-pressed="true"><span data-icon="feed"></span><span>投喂</span></button>
         <button class="dock-button" data-panel="fish"><span data-icon="fish"></span><span>我的锦鲤</span></button>
-        <button class="dock-button" data-panel="ranking"><span data-icon="trophy"></span><span>食量榜</span></button>
         <button class="dock-button" data-panel="weather"><span data-icon="sun"></span><span>天气</span></button>
         <button id="sound-button" class="dock-button" aria-label="开启声音" aria-pressed="false"><span data-icon="sound-off"></span><span>声音</span></button>
         <button id="zen-button" class="dock-button" aria-label="进入沉浸模式"><span data-icon="expand"></span><span>沉浸</span></button>

@@ -87,6 +87,9 @@
   }
   function lerpLook(a, b, t) { for (const k in b) { if (Array.isArray(b[k])) for (let i = 0; i < b[k].length; i++) a[k][i] += (b[k][i] - a[k][i]) * t; else a[k] += (b[k] - a[k]) * t; } }
 
+  // How far the turtle's centre must stay from the water's edge: the shell is 22 wide and the front
+  // flippers reach about 29 from the middle, so 25 (the old value) let a flipper poke out of the pond.
+  const TURTLE_CLEARANCE = 34;
   class Turtle {
     constructor(variant, rnd) {
       Object.assign(this, { variant, rnd, x: .25 + rnd() * .5, y: .3 + rnd() * .45, angle: rnd() * TAU, v: 0, turn: 0, stroke: rnd() * TAU, depth: .5, depthGoal: .5, goal: null, goalTime: 0, rest: 2 + rnd() * 4, breath: 20 + rnd() * 30, surfaced: 0, look: 0, lookGoal: 0, neck: 1, size: 1.08 + rnd() * .14, bubble: 0 });
@@ -134,7 +137,7 @@
       this.v += Math.max(0, Math.sin(this.stroke)) * (resting ? 0 : L * .5) * dt;
       this.v *= Math.exp(-dt * .9);
       x += Math.cos(this.angle) * this.v * dt; y += Math.sin(this.angle) * this.v * dt;
-      const safe = scene?.sim?.habitat?.project(x, y, L * .42);
+      const safe = scene?.sim?.habitat?.project(x, y, TURTLE_CLEARANCE * s);
       if (safe) [x, y] = safe;
       this.x = clamp(x / w, .05, .95); this.y = clamp(y / h, .06, .94);
       this.depth += (this.depthGoal - this.depth) * Math.min(1, dt * .45);
@@ -392,6 +395,17 @@
     butterflyWeather(settings) { return this.activeButterflies.length > 0 && settings.butterflies && !settings.night && settings.weather === 'sunny'; }
     dragonflyWeather(settings) { return this.activeDragonflies.length > 0 && settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
     fireflyWeather(settings) { return this.insects.fireflies > 0 && settings.butterflies && settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
+    // Screen positions of the big lotus leaves a koi can shelter under when it rains.
+    shelterPoints() {
+      const out = [];
+      for (const fl of this.floaters) {
+        const f = fl.f;
+        if (f[3] !== 'l' || f[2] < 22) continue;
+        const [sx, sy] = this.R.imageToScreen(f[0], f[1]);
+        out.push({ x: sx, y: sy });
+      }
+      return out;
+    }
     // Something disturbed the water at (x, y): crabs close by bolt for it and dive.
     startle(x, y) {
       for (const c of this.crabs) c.startle(x, y, 130 * this.scale, this.R);
@@ -583,7 +597,9 @@
       for (const p of this.splashes) { p.age += dt; if (!p.ring) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.exp(-dt * 7); p.vy *= Math.exp(-dt * 7); } }
       this.splashes = this.splashes.filter(p => p.age < p.life);
       // Now and then in a heavy downpour the sky flickers white, and thunder rolls in a moment later.
-      if (weather === 'rain' && rainK > .6 && !this.calm) {
+      // Rain heavier than the default setting rolls thunder; the default (.5) already qualifies, so a plain
+      // "下雨" is enough to see it.
+      if (weather === 'rain' && rainK > .45 && !this.calm) {
         this.nextBolt -= dt;
         if (this.nextBolt <= 0) {
           const k = .6 + rnd() * .4, t0 = this.time;
