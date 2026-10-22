@@ -12,16 +12,33 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace BichiPond
 {
+    // TEMP DIAGNOSTIC (remove once the Windows corner card is confirmed): the page's tap trace lands here,
+    // so a dead card button can be told apart from a click the desktop never passed on.
+    internal static class DebugLog
+    {
+        private static readonly string File = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond", "pond-debug.log");
+        public static void Write(string message)
+        {
+            try { System.IO.File.AppendAllText(File, $"[{DateTime.Now:HH:mm:ss.fff}] {message}\r\n"); } catch { }
+        }
+    }
+
     internal static class PondPage
     {
         public const string Host = "pond.local";
         public static readonly Color Backdrop = Color.FromArgb(0x74, 0x8d, 0x79);
+        /// <summary>The panels' paper — also the background of a panel's own small window.</summary>
+        public static readonly Color Paper = Color.FromArgb(0xf6, 0xf4, 0xea);
         public static string WebFolder => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web");
 
-        /// <summary>A WebView2 showing the pond; <paramref name="mode"/> "wallpaper" hides the page's controls.</summary>
-        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave)
+        /// <summary>A WebView2 showing the pond; <paramref name="mode"/> "wallpaper" hides the page's controls and
+        /// "corner" keeps its corner card on the desktop. <paramref name="panel"/> opens that panel directly (the
+        /// interactive window, reached from the wallpaper's card). <paramref name="safe"/> is the screen's work-area
+        /// inset as top/right/bottom/left in CSS px, keeping the card clear of a taskbar docked at a side.</summary>
+        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave, string panel = null, int[] safe = null, bool waitForPanel = false, bool waitForLoad = false)
         {
-            var view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Backdrop };
+            var view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = mode == "panel" ? Paper : Backdrop };
             parent.Controls.Add(view);
             await view.EnsureCoreWebView2Async(env);
             var core = view.CoreWebView2;
@@ -42,7 +59,43 @@ namespace BichiPond
             };
             // If the page's renderer dies (GPU reset, low memory), load the pond again rather than leave a blank desktop.
             core.ProcessFailed += (s, e) => { try { core.Reload(); } catch (Exception) { } };
-            core.Navigate($"https://{Host}/index.html" + (mode == null ? "" : "?mode=" + mode));
+            if (safe != null)
+            {
+                // The card clears a taskbar docked at the top or a side through the page's safe-area variables.
+                // The script runs before the document element exists, so it waits for the DOM to be ready.
+                var inset = new System.Text.StringBuilder("(function(){function s(){try{var d=document.documentElement.style;");
+                string[] side = { "top", "right", "bottom", "left" };
+                for (int i = 0; i < side.Length; i++)
+                    if (safe[i] > 0) inset.Append("d.setProperty('--safe-").Append(side[i]).Append("','").Append(safe[i]).Append("px');");
+                inset.Append("}catch(e){}}if(document.documentElement)s();else document.addEventListener('DOMContentLoaded',s);})();");
+                await core.AddScriptToExecuteOnDocumentCreatedAsync(inset.ToString());
+            }
+            string query = mode == null ? "" : "?mode=" + mode;
+            if (panel != null) query += (query.Length == 0 ? "?" : "&") + "panel=" + panel;
+            TaskCompletionSource<bool> loaded = null;
+            if (waitForLoad)
+            {
+                loaded = new TaskCompletionSource<bool>();
+                core.NavigationCompleted += (s, e) => loaded.TrySetResult(e.IsSuccess);
+            }
+            core.Navigate($"https://{Host}/index.html" + query);
+            if (loaded != null) await Task.WhenAny(loaded.Task, Task.Delay(8000));
+            if (waitForPanel)
+            {
+                // The page opens its panel a frame after loading; wait for that, so a window shown afterwards is
+                // already filled in and nothing flashes while it loads.
+                for (int i = 0; i < 75; i++)
+                {
+                    try
+                    {
+                        string open = await core.ExecuteScriptAsync("(()=>{const d=document.querySelector('#panel');return d&&d.open?'1':'0';})()");
+                        if (open == "\"1\"") break;
+                    }
+                    catch (Exception) { }
+                    await Task.Delay(40);
+                }
+                await Task.Delay(80);
+            }
             return view;
         }
 
@@ -75,17 +128,21 @@ namespace BichiPond
     /// <summary>The pond as one screen's wallpaper, living in the desktop behind the icons.</summary>
     internal sealed class WallpaperForm : Form
     {
-        public Screen Screen { get; }
+        public string DeviceName { get; }
+        public Rectangle ScreenBounds { get; }
+        public Rectangle WorkArea { get; }
         public WebView2 View { get; private set; }
         public bool Hidden { get; private set; }
 
-        public WallpaperForm(Screen screen)
+        public WallpaperForm(string deviceName, Rectangle screen, Rectangle workArea)
         {
-            Screen = screen;
+            DeviceName = deviceName;
+            ScreenBounds = screen;
+            WorkArea = workArea;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            Bounds = screen.Bounds;
+            Bounds = screen;
             BackColor = PondPage.Backdrop;
             AutoScaleMode = AutoScaleMode.None; // sizes are the screen's real pixels, never rescaled
             Text = "摸鱼 Wallpaper";
@@ -101,26 +158,51 @@ namespace BichiPond
         {
             CreateHandle();
             // Once inside the desktop the window's position is relative to its new parent; keep WinForms in agreement.
-            Bounds = Desktop.Attach(Handle, Screen.Bounds);
+            Bounds = Desktop.Attach(Handle, ScreenBounds);
             Show();
-            View = await PondPage.Create(this, env, "wallpaper", onSave);
+            // The pond keeps its corner card (clock, weather, dock) on the desktop; the screen's work-area
+            // inset, in CSS px, keeps the card clear of a taskbar docked at the top or a side.
+            double k = Native.ScaleOf(Handle);
+            var bounds = ScreenBounds;
+            var work = WorkArea;
+            int[] safe =
+            {
+                Math.Max(0, (int)Math.Round((work.Top - bounds.Top) / k)),
+                Math.Max(0, (int)Math.Round((bounds.Right - work.Right) / k)),
+                Math.Max(0, (int)Math.Round((bounds.Bottom - work.Bottom) / k)),
+                Math.Max(0, (int)Math.Round((work.Left - bounds.Left) / k)),
+            };
+            View = await PondPage.Create(this, env, "corner", onSave, null, safe);
         }
 
-        /// <summary>Stops drawing while nobody can see it (a maximised app over it, the screen locked), and back.</summary>
+        /// <summary>Notes that nobody can see this screen for now. The view is deliberately left visible: hiding
+        /// a WebView2 makes Windows paint whatever is behind it, so coming back would flash the plain desktop
+        /// before the pond. Drawing is stopped by pausing the page instead (see <see cref="PondApp"/>).</summary>
         public void SetHidden(bool hidden)
         {
-            if (Hidden == hidden || View?.CoreWebView2 == null) return;
             Hidden = hidden;
-            View.Visible = !hidden; // WebView2 throttles a hidden view; the page sees document.hidden and rests
         }
 
-        /// <summary>A tap at a screen point (device px) on this screen's desktop.</summary>
+        /// <summary>A tap at a screen point (device px) on this screen's desktop. The point goes to the page
+        /// unconverted: the page knows its own pixel ratio, while this window's DPI reading is unreliable
+        /// once the window has been parented into the desktop.</summary>
         public void Tap(Point screenPoint)
         {
+            DebugLog.Write($"sending tap to {DeviceName} at {screenPoint.X},{screenPoint.Y}");
+            Send("pondTapDevice", screenPoint);
+        }
+
+        /// <summary>Held still: scatter a handful of food (or stir a big ring, in watching mode).</summary>
+        public void Hold(Point screenPoint) => Send("pondHoldDevice", screenPoint);
+
+        /// <summary>Two quick taps: frighten the koi away.</summary>
+        public void DoubleTap(Point screenPoint) => Send("pondDoubleTapDevice", screenPoint);
+
+        private void Send(string method, Point screenPoint)
+        {
             if (View?.CoreWebView2 == null) return;
-            double k = Native.ScaleOf(Handle);
-            double x = (screenPoint.X - Screen.Bounds.Left) / k, y = (screenPoint.Y - Screen.Bounds.Top) / k;
-            _ = View.CoreWebView2.ExecuteScriptAsync(FormattableString.Invariant($"window.pondTap&&pondTap({x:0.#},{y:0.#})"));
+            double x = screenPoint.X - ScreenBounds.Left, y = screenPoint.Y - ScreenBounds.Top;
+            _ = View.CoreWebView2.ExecuteScriptAsync(FormattableString.Invariant($"window.{method}&&{method}({x:0.#},{y:0.#})"));
         }
     }
 
@@ -140,10 +222,10 @@ namespace BichiPond
             MinimumSize = new Size(LogicalToDeviceUnits(440), LogicalToDeviceUnits(600));
         }
 
-        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave)
+        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave, string panel = null)
         {
             Show();
-            View = await PondPage.Create(this, env, null, onSave);
+            View = await PondPage.Create(this, env, null, onSave, panel);
         }
     }
 }

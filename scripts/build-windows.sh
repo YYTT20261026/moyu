@@ -6,7 +6,7 @@ set -euo pipefail
 setopt null_glob
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOTNET="${DOTNET:-$(command -v dotnet || echo "$HOME/.dotnet/dotnet")}"
-VERSION="1.2.1"
+VERSION="1.2.4"
 PROJ="$ROOT/native/windows"
 OUT="$ROOT/build/windows/BichiPond"
 ZIP="$ROOT/dist/摸鱼-Windows-$VERSION.zip"
@@ -32,6 +32,9 @@ open(out, "wb").write(head + entries + b"".join(pngs))
 PY
 
 echo "▸ Building (.NET Framework 4.8 + WebView2)…"
+# The installer project lives inside this folder and its bin\ holds .NET 8 reference assemblies; MSBuild's
+# assembly search would pick them up as the net48 framework and the app would not compile.
+rm -rf "$PROJ/installer/bin" "$PROJ/installer/obj"
 rm -rf "$OUT"
 "$DOTNET" publish "$PROJ/BichiPond.csproj" -c Release -o "$OUT" --nologo -v quiet
 rm -f "$OUT"/*.pdb "$OUT"/*.xml

@@ -2,6 +2,7 @@
 // interactive window. Every save one pond page makes is passed to the others, so they stay in step.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -17,26 +18,44 @@ namespace BichiPond
     internal sealed class PondApp : ApplicationContext
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "BichiKoiPond";
+        // Legacy: pages used to ask the host to open the interactive window at a panel; the wallpaper's card
+        // now opens its panel in place, so this only serves a page left open from an older build.
+        private const string PanelRequest = "panel:";
+        // TEMP DIAGNOSTIC: the page's tap trace, written to %LOCALAPPDATA%\BichiPond\pond-debug.log.
+        private const string DebugRequest = "dbg:";
         private readonly List<WallpaperForm> walls = new List<WallpaperForm>();
         private readonly NotifyIcon tray = new NotifyIcon();
         private ToolStripMenuItem soundItem;
-        private readonly Timer watch = new Timer { Interval = 1000 };
+        // Checked often, so a screen that comes back starts drawing again right away instead of up to a
+        // second later (the pond would look frozen for a moment after a full-screen app closed).
+        private readonly Timer watch = new Timer { Interval = 300 };
         private readonly ShellWatcher shell;
         private CoreWebView2Environment env;
         private InteractiveForm window;
+        private PanelForm panelWindow;
         private bool userPaused, locked, rebuilding, quitting, soundOn;
+        private string screenSignature = "";
         private string season = "spring";
         private string weather = "sunny";
         private bool night;
         // Taps on the desktop, seen through a low-level mouse hook (the desktop icons layer takes the real clicks).
         private IntPtr hook;
         private Native.LowLevelMouseProc hookProc;
+        // Esc on the desktop leaves the immersive view: the wallpaper page never has the keyboard.
+        private IntPtr keyHook;
+        private Native.LowLevelKeyboardProc keyProc;
         private Native.POINT downAt;
         private uint downTime;
+        // Holding the button still scatters food; two quick taps frighten the koi.
+        private readonly Timer hold = new Timer { Interval = 520 };
+        private bool pressed, moved;
+        private Native.POINT lastUpAt;
+        private uint lastUpTime;
 
         public PondApp()
         {
             shell = new ShellWatcher(() => Rebuild(1500));
+            hold.Tick += HoldTick;
             BuildTray();
             watch.Tick += (s, e) => UpdateVisibility();
             SystemEvents.DisplaySettingsChanged += (s, e) => Rebuild(800);
@@ -76,10 +95,14 @@ namespace BichiPond
             // which is why sound only ever worked there.
             var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
             env = await CoreWebView2Environment.CreateAsync(null, data, options);
+            screenSignature = CurrentScreenSignature();
             await BuildWallpapers();
             hookProc = OnMouse;
             hook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, hookProc, Native.GetModuleHandle(null), 0);
+            keyProc = OnKey;
+            keyHook = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, keyProc, Native.GetModuleHandle(null), 0);
             watch.Start();
+            PrewarmPanel();
         }
 
         private async Task BuildWallpapers()
@@ -88,9 +111,9 @@ namespace BichiPond
             foreach (var w in walls) { try { w.Close(); w.Dispose(); } catch (Exception) { } }
             walls.Clear();
             if (!Desktop.Find()) return;
-            foreach (var screen in Screen.AllScreens)
+            foreach (var m in Native.Monitors())
             {
-                var wall = new WallpaperForm(screen);
+                var wall = new WallpaperForm(m.Item1, m.Item2, m.Item3);
                 walls.Add(wall);
                 await wall.Start(env, OnSave);
             }
@@ -113,6 +136,15 @@ namespace BichiPond
         // A page saved the pond: hand the same save to every other page, and note the weather for the menu.
         private void OnSave(WebView2 from, string json)
         {
+            // The wallpaper's corner card asks for a panel: open the interactive window straight into it.
+            if (json?.StartsWith(PanelRequest) == true)
+            {
+                string name = json.Substring(PanelRequest.Length);
+                DebugLog.Write("panel requested: " + name);
+                if (name == "fish" || name == "weather" || name == "settings") MainThread(() => ShowPanel(name));
+                return;
+            }
+            if (json?.StartsWith(DebugRequest) == true) { DebugLog.Write(json.Substring(DebugRequest.Length)); return; }
             string call = "window.__pondSync&&__pondSync(" + PondPage.JsString(json) + ")";
             foreach (var v in Views) if (v != from) _ = v.CoreWebView2.ExecuteScriptAsync(call);
             var se = Regex.Match(json, "\"season\":\"(\\w+)\"");
@@ -142,6 +174,15 @@ namespace BichiPond
         // Each screen's pond rests while nobody can see it: a maximised or full-screen app over it, or the session locked.
         private void UpdateVisibility()
         {
+            // The desktop's geometry can change without DisplaySettingsChanged firing — a remote session
+            // resizing its virtual display, say — which would leave the pond sized for the old screen (its
+            // controls hanging off the edge). Compare the screens once a second and re-attach when they move.
+            string screens = CurrentScreenSignature();
+            if (screens != screenSignature)
+            {
+                screenSignature = screens;
+                Rebuild(350);
+            }
             IntPtr fg = Native.GetForegroundWindow();
             IntPtr covering = IntPtr.Zero;
             if (fg != IntPtr.Zero && Native.IsWindowVisible(fg) && !IsShell(fg) && Native.GetWindowRect(fg, out var r))
@@ -153,10 +194,18 @@ namespace BichiPond
             }
             foreach (var w in walls)
             {
-                bool coveredHere = covering != IntPtr.Zero && Screen.FromHandle(covering).DeviceName == w.Screen.DeviceName;
+                bool coveredHere = covering != IntPtr.Zero && Screen.FromHandle(covering).DeviceName == w.DeviceName;
                 w.SetHidden(locked || coveredHere);
-                SetPaused(w, userPaused);
+                // Paused is the only thing that stops the page drawing: a covered or locked screen keeps its
+                // last frame on the desktop, so nothing flashes when the app in front goes away.
+                SetPaused(w, userPaused || locked || coveredHere);
             }
+        }
+
+        /// <summary>Every screen's bounds and work area, so a change in either is noticed.</summary>
+        private static string CurrentScreenSignature()
+        {
+            return string.Join("|", Native.Monitors().Select(m => $"{m.Item2.X},{m.Item2.Y},{m.Item2.Width},{m.Item2.Height}").OrderBy(s => s));
         }
 
         private static bool IsShell(IntPtr hwnd)
@@ -173,29 +222,126 @@ namespace BichiPond
             {
                 var m = (Native.MSLLHOOKSTRUCT)System.Runtime.InteropServices.Marshal.PtrToStructure(lParam, typeof(Native.MSLLHOOKSTRUCT));
                 int msg = wParam.ToInt32();
-                if (msg == Native.WM_LBUTTONDOWN) { downAt = m.pt; downTime = m.time; }
-                else if (msg == Native.WM_LBUTTONUP && m.time - downTime < 350 && Math.Abs(m.pt.X - downAt.X) < 6 && Math.Abs(m.pt.Y - downAt.Y) < 6)
+                if (msg == Native.WM_LBUTTONDOWN)
                 {
-                    var pt = m.pt;
-                    MainThread(() => TapIfDesktop(pt));
+                    downAt = m.pt; downTime = m.time; pressed = true; moved = false;
+                    // A panel floating over the desktop goes away as soon as a click lands outside it, the way
+                    // a menu does. It never gets the deactivate event reliably, being topmost.
+                    if (panelWindow != null && !panelWindow.IsDisposed)
+                    {
+                        var pt = m.pt;
+                        MainThread(() => DismissPanel(pt));
+                    }
+                    hold.Stop(); hold.Start();
+                }
+                else if (msg == Native.WM_MOUSEMOVE)
+                {
+                    // Moving means it is a drag on the desktop (icon selection), not a hold.
+                    if (pressed && (Math.Abs(m.pt.X - downAt.X) > 6 || Math.Abs(m.pt.Y - downAt.Y) > 6)) { moved = true; hold.Stop(); }
+                }
+                else if (msg == Native.WM_LBUTTONUP)
+                {
+                    pressed = false; hold.Stop();
+                    if (m.time - downTime < 350 && Math.Abs(m.pt.X - downAt.X) < 6 && Math.Abs(m.pt.Y - downAt.Y) < 6)
+                    {
+                        var pt = m.pt;
+                        bool twice = m.time - lastUpTime < 350 && Math.Abs(pt.X - lastUpAt.X) < 8 && Math.Abs(pt.Y - lastUpAt.Y) < 8;
+                        lastUpTime = twice ? 0 : m.time; lastUpAt = pt;
+                        if (twice) MainThread(() => DoubleTapAt(pt));
+                        else MainThread(() => TapIfDesktop(pt));
+                    }
                 }
             }
             return Native.CallNextHookEx(hook, code, wParam, lParam);
         }
 
+        // Esc while the desktop is in front leaves the immersive view on every screen. The pond pages never
+        // hold the keyboard (the desktop does), so the key is repeated to them from here.
+        private IntPtr OnKey(int code, IntPtr wParam, IntPtr lParam)
+        {
+            if (code >= 0)
+            {
+                var k = (Native.KBDLLHOOKSTRUCT)System.Runtime.InteropServices.Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
+                int msg = wParam.ToInt32();
+                if ((msg == Native.WM_KEYDOWN || msg == Native.WM_SYSKEYDOWN) && k.vkCode == Native.VK_ESCAPE)
+                {
+                    IntPtr fg = Native.GetForegroundWindow();
+                    if (fg == IntPtr.Zero || IsShell(fg) || IsOurs(fg)) MainThread(() => Broadcast("{zen:false}"));
+                }
+            }
+            return Native.CallNextHookEx(keyHook, code, wParam, lParam);
+        }
+
+        private static bool IsOurs(IntPtr hwnd)
+        {
+            Native.GetWindowThreadProcessId(hwnd, out uint pid);
+            return pid == (uint)Process.GetCurrentProcess().Id;
+        }
+
+        /// <summary>One command to every pond on the desktop (the tray's own commands go to a single page).</summary>
+        private void Broadcast(string options)
+        {
+            foreach (var w in walls)
+            {
+                var core = w.View?.CoreWebView2;
+                if (core != null) _ = core.ExecuteScriptAsync($"window.pondControl&&pondControl.set({options})");
+            }
+        }
+
         private void TapIfDesktop(Native.POINT pt)
+        {
+            DebugLog.Write($"click at {pt.X},{pt.Y} under={Native.ClassOf(Native.WindowFromPoint(pt)) ?? "?"}");
+            if (!IsDesktopPoint(pt)) return;
+            var p = new Point(pt.X, pt.Y);
+            walls.FirstOrDefault(w => w.ScreenBounds.Contains(p))?.Tap(p);
+        }
+
+        // Held still on the desktop: scatter a handful of food.
+        private void HoldTick(object sender, EventArgs e)
+        {
+            hold.Stop();
+            if (!pressed || moved) return;
+            var pt = downAt;
+            DebugLog.Write($"hold at {pt.X},{pt.Y}");
+            MainThread(() => SendToDesktop(pt, (w, p) => w.Hold(p)));
+        }
+
+        private void DoubleTapAt(Native.POINT pt)
+        {
+            DebugLog.Write($"double tap at {pt.X},{pt.Y}");
+            SendToDesktop(pt, (w, p) => w.DoubleTap(p));
+        }
+
+        private void SendToDesktop(Native.POINT pt, Action<WallpaperForm, Point> send)
+        {
+            if (!IsDesktopPoint(pt)) return;
+            var p = new Point(pt.X, pt.Y);
+            var wall = walls.FirstOrDefault(w => w.ScreenBounds.Contains(p));
+            if (wall != null) send(wall, p);
+        }
+
+        // What is under the pointer when the desktop itself is in front. A drag or a right click never reaches
+        // here on purpose: those belong to Explorer (icon selection, its context menu) and taking them would
+        // break the desktop.
+        private static bool IsDesktopPoint(Native.POINT pt)
         {
             IntPtr under = Native.WindowFromPoint(pt);
             string c = Native.ClassOf(under);
-            bool desktop = c == "SysListView32" && Native.ClassOf(Native.GetParent(under)) == "SHELLDLL_DefView" || c == "SHELLDLL_DefView" || c == "WorkerW" || c == "Progman";
-            if (!desktop) return;
-            var p = new Point(pt.X, pt.Y);
-            walls.FirstOrDefault(w => w.Screen.Bounds.Contains(p))?.Tap(p);
+            return c == "SHELLDLL_DefView" || c == "WorkerW" || c == "Progman"
+                || c == "SysListView32" && Native.ClassOf(Native.GetParent(under)) == "SHELLDLL_DefView";
+        }
+
+        private void DismissPanel(Native.POINT pt)
+        {
+            if (panelWindow == null || panelWindow.IsDisposed || !panelWindow.IsOpen) return;
+            var r = panelWindow.Bounds;
+            if (pt.X < r.Left || pt.X >= r.Right || pt.Y < r.Top || pt.Y >= r.Bottom) panelWindow.Dismiss();
         }
 
         private void MainThread(Action a)
         {
             if (walls.Count > 0 && walls[0].IsHandleCreated) walls[0].BeginInvoke(a);
+            else if (panelWindow != null && !panelWindow.IsDisposed && panelWindow.IsHandleCreated) panelWindow.BeginInvoke(a);
         }
 
         // Something went wrong: keep the details in %LOCALAPPDATA%\BichiPond\error.log and say where they are.
@@ -248,13 +394,72 @@ namespace BichiPond
             tray.Visible = true;
         }
 
-        public async void OpenWindow()
+        /// <summary>One panel in its own small window, floating above the desktop icons — what the wallpaper's
+        /// card opens. The window is prepared in the background (see <see cref="PrewarmPanel"/>), so opening a
+        /// panel only moves it into place and tells the page which one to show.</summary>
+        private async void ShowPanel(string panel)
         {
             if (env == null) return;
-            if (window != null && !window.IsDisposed) { window.WindowState = window.WindowState == FormWindowState.Minimized ? FormWindowState.Normal : window.WindowState; window.Activate(); return; }
+            var form = panelWindow;
+            if (form == null || form.IsDisposed)
+            {
+                if (form != null) form.Close();
+                form = NewPanelWindow();
+            }
+            // A first tap can arrive while the background prewarm is still loading: wait for that same load.
+            try { await form.EnsurePrepared(env, PanelSaved); }
+            catch (Exception ex) { DebugLog.Write("panel prepare failed: " + ex.Message); return; }
+            try { await form.Open(panel); }
+            catch (Exception ex) { DebugLog.Write("panel open failed: " + ex.Message); }
+        }
+
+        // Panel pages save the pond like any other; closing one asks for the window to go away.
+        private void PanelSaved(WebView2 view, string json)
+        {
+            if (json == "panel-close") { panelWindow?.Dismiss(); return; }
+            OnSave(view, json);
+        }
+
+        private PanelForm NewPanelWindow()
+        {
+            var form = new PanelForm();
+            panelWindow = form;
+            form.FormClosed += (s, e) => { if (panelWindow == form) panelWindow = null; };
+            return form;
+        }
+
+        /// <summary>Builds the panel window and loads its page while nothing is on screen, then leaves it
+        /// hidden. The first tap on the card then opens instantly instead of waiting for a page to load.</summary>
+        private async void PrewarmPanel()
+        {
+            if (env == null || panelWindow != null) return;
+            await Task.Delay(200); // let the wallpapers start loading first
+            if (panelWindow != null) return;
+            var form = NewPanelWindow();
+            try { await form.EnsurePrepared(env, PanelSaved); }
+            catch (Exception ex)
+            {
+                DebugLog.Write("panel prewarm failed: " + ex.Message);
+                if (panelWindow == form) panelWindow = null;
+                form.Dispose();
+            }
+        }
+
+        public async void OpenWindow(string panel = null)
+        {
+            if (env == null) return;
+            if (window != null && !window.IsDisposed)
+            {
+                window.WindowState = window.WindowState == FormWindowState.Minimized ? FormWindowState.Normal : window.WindowState;
+                window.Activate();
+                var core = window.View?.CoreWebView2;
+                if (panel != null)
+                    if (core != null) _ = core.ExecuteScriptAsync($"openPanel('{panel}')");
+                return;
+            }
             window = new InteractiveForm();
             window.FormClosed += (s, e) => { window = null; };
-            await window.Start(env, OnSave);
+            await window.Start(env, OnSave, panel);
         }
 
         private static bool IsStartup()
@@ -277,7 +482,9 @@ namespace BichiPond
             quitting = true;
             watch.Stop();
             if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
+            if (keyHook != IntPtr.Zero) Native.UnhookWindowsHookEx(keyHook);
             tray.Visible = false;
+            panelWindow?.Close();
             window?.Close();
             foreach (var w in walls) { try { w.Close(); } catch (Exception) { } }
             Desktop.Refresh();

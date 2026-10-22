@@ -15,7 +15,7 @@
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <Version>1.2.1</Version>
+    <Version>1.2.4</Version>
     <Product>摸鱼</Product>
     <AssemblyTitle>摸鱼 · 锦鲤池塘动态壁纸</AssemblyTitle>
     <Copyright>摸鱼 · 独立复刻作品</Copyright>
@@ -23,7 +23,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs;Desktop.cs;PondApp.cs;PondWindows.cs;Native.cs" />
+    <Compile Include="Program.cs;Desktop.cs;PondApp.cs;PondWindows.cs;PanelForm.cs;Native.cs" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <Reference Include="Microsoft.CSharp" />

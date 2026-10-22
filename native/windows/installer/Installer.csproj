@@ -1,28 +1,39 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- The installer is a plain .NET Framework 4.8 executable (part of every Windows 10 and 11), exactly like
+       BichiPond.exe itself. No single-file self-extraction is involved, so it launches from any folder —
+       including network shares, cloud-synced paths and folders watched by security software, where a
+       self-extracting .NET app would fail with the host error 0x800080A0. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
     <AssemblyName>MoYuSetup</AssemblyName>
     <RootNamespace>MoYu.Installer</RootNamespace>
     <ApplicationIcon>..\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.2.1</Version>
+    <Version>1.2.4</Version>
     <Product>摸鱼</Product>
     <AssemblyTitle>摸鱼安装程序</AssemblyTitle>
     <Description>摸鱼 Windows 安装程序</Description>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
+    <Copyright>摸鱼 · 独立复刻作品</Copyright>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="Program.cs" />
     <EmbeddedResource Include="payload.zip" LogicalName="MoYu.Installer.payload.zip" />
     <EmbeddedResource Include="..\AppIcon.ico" LogicalName="MoYu.Installer.AppIcon.ico" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 </Project>
