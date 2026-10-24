@@ -354,9 +354,17 @@
     }
   }
 
+  // Things two koi might say to each other, chosen by the speaker's temperament.
+  const CHAT_LINES = {
+    greedy: ['那边好像又掉了一粒', '我先去看看', '今天的食不太够'],
+    timid: ['你听见什么了吗', '小声一点', '水里好像有动静'],
+    loner: ['……', '嗯', '别跟着我'],
+    tame: ['一起游吧', '你今天气色不错', '再待一会儿']
+  };
   class PondScene {
     constructor(R, sim, rnd = Math.random) {
       this.R = R; this.sim = sim; this.rnd = rnd; this.time = 0; this.w = 1; this.h = 1; this.scale = 1;
+      this.chats = []; this.nextChat = 6;
       this.turtles = [0, 1].map(v => new Turtle(v, rnd));
       this.butterflies = [0, 1, 2].map(s => new Butterfly(s, rnd));
       this.dragonflies = [0, 1].map(s => new Dragonfly(s, rnd));
@@ -395,6 +403,27 @@
     butterflyWeather(settings) { return this.activeButterflies.length > 0 && settings.butterflies && !settings.night && settings.weather === 'sunny'; }
     dragonflyWeather(settings) { return this.activeDragonflies.length > 0 && settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
     fireflyWeather(settings) { return this.insects.fireflies > 0 && settings.butterflies && settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
+    // What two koi say when they meet. Each koi speaks out of its own temperament.
+    updateChat(dt, settings) {
+      this.chats = this.chats.filter(c => c.until > this.time);
+      if (!settings.chat) { if (this.chats.length) this.chats.length = 0; this.nextChat = 5; return; }
+      this.nextChat -= dt;
+      if (this.nextChat > 0) return;
+      this.nextChat = this.spawnChat() ? 15 + this.rnd() * 18 : 4 + this.rnd() * 6;
+    }
+    // Looks for two koi that keep each other company and happen to be side by side right now.
+    spawnChat() {
+      const w = this.w, h = this.h;
+      for (const a of this.sim.allFish) {
+        const b = this.sim.bestFriend(a);
+        if (!b || !b.id || a.id >= b.id) continue;
+        if (Math.hypot((a.x - b.x) * w, (a.y - b.y) * h) > 130) continue;
+        const pool = CHAT_LINES[a.temper] || CHAT_LINES.tame;
+        this.chats.push({ a, b, text: pool[Math.floor(this.rnd() * pool.length)], until: this.time + 5.5 });
+        return true;
+      }
+      return false;
+    }
     // Screen positions of the big lotus leaves a koi can shelter under when it rains.
     shelterPoints() {
       const out = [];
@@ -539,6 +568,18 @@
     update(dt, settings) {
       this.time += dt;
       this.updatePlants(dt);
+      this.updateChat(dt, settings);
+      // A koi the panel asked us to point out: rings keep opening around her for a few seconds.
+      if (this.highlight) {
+        if (this.highlight.until > this.time) {
+          this.highlightTick = (this.highlightTick || 0) - dt;
+          if (this.highlightTick <= 0) {
+            this.highlightTick = .45;
+            const f = this.sim.allFish.find(o => o.id === this.highlight.id);
+            if (f) this.drop(f.x * this.w, f.y * this.h, 24 * this.scale, .55);
+          }
+        } else this.highlight = null;
+      }
       if (this.time - this.phaseAt > 60 || !this.moonDisc) { this.phaseAt = this.time; this.phase = moonPhase(); }
       this.moonDisc = [this.moonAt[0], this.h - this.moonAt[1], 26 * this.scale, this.phase.angle];
       const rainK = clamp(settings.rainAmount ?? .5, 0, 1), snowK = clamp(settings.snowAmount ?? .5, 0, 1);
@@ -716,7 +757,9 @@
       // Pectoral fins spread when gliding or braking, fold back at speed, the inner one flares in a turn.
       const L = BODY.length * s, bl = f.v / L, pal = fishPalette(f), slender = pal.kind === 'silvercarp', finDef = R.sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'];
       const tint = pal.kind === 'utsuri' ? [1, 1, 1, .92] : f.species === 'silvercarp' ? [...rgb(pal.fin), .85] : this.finTint[f.palette];
-      const base = 1.05 - .6 * clamp(bl / 1.4, 0, 1) + (f.thrust < .3 ? Math.sin(this.time * 4.2 + f.seed) * .16 : 0);
+      // Eased, not switched: the fanning fades out as the fish picks up thrust, so it never pops on and off.
+      const fan = clamp(1 - f.thrust / .45, 0, 1);
+      const base = 1.05 - .6 * clamp(bl / 1.4, 0, 1) + Math.sin(this.time * 4.2 + f.seed) * .16 * fan;
       const fins = [[4, .95, 1], [8, .55, .58]];
       for (const [i, spreadK, size] of fins) {
         const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girthOf(f.seed), pal.kind) * s * .8;
