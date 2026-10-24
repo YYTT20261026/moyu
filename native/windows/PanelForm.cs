@@ -17,6 +17,10 @@ namespace BichiPond
     {
         private const int Wide = 620;
         private const int Tall = 790;
+        // The size button switches the window between these two.
+        private const int WideBig = 900;
+        private const int TallBig = 1010;
+        private bool wide;
         private const int CornerPreference = 33; // DWMWA_WINDOW_CORNER_PREFERENCE
         private const int CornerRound = 2;       // DWMWCP_ROUND
 
@@ -75,8 +79,8 @@ namespace BichiPond
         {
             var area = Screen.FromPoint(Cursor.Position).WorkingArea;
             double k = DeviceDpi / 96.0;
-            int width = Math.Min((int)Math.Round(Wide * k), area.Width - 40);
-            int height = Math.Min((int)Math.Round(Tall * k), area.Height - 40);
+            int width = Math.Min((int)Math.Round((wide ? WideBig : Wide) * k), area.Width - 40);
+            int height = Math.Min((int)Math.Round((wide ? TallBig : Tall) * k), area.Height - 40);
             var target = new Rectangle(area.Left + (area.Width - width) / 2, area.Top + (area.Height - height) / 2, width, height);
 
             // Draw the panel first, while the window is still parked off-screen, and only then move it into
@@ -97,6 +101,18 @@ namespace BichiPond
             Native.SetForegroundWindow(Handle);
             arm.Stop();
             arm.Start();
+        }
+
+        /// <summary>Grow or shrink the window, kept on the same screen; the next open remembers the choice.</summary>
+        public void ToggleSize()
+        {
+            wide = !wide;
+            if (!IsOpen) return;
+            var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            double k = DeviceDpi / 96.0;
+            int w = Math.Min((int)Math.Round((wide ? WideBig : Wide) * k), area.Width - 40);
+            int h = Math.Min((int)Math.Round((wide ? TallBig : Tall) * k), area.Height - 40);
+            Bounds = new Rectangle(area.Left + (area.Width - w) / 2, area.Top + (area.Height - h) / 2, w, h);
         }
 
         /// <summary>Puts the panel away but keeps the window and its page ready for the next time.</summary>

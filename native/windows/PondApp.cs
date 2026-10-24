@@ -417,6 +417,14 @@ namespace BichiPond
         private void PanelSaved(WebView2 view, string json)
         {
             if (json == "panel-close") { panelWindow?.Dismiss(); return; }
+            if (json == "panel-expand") { panelWindow?.ToggleSize(); return; }
+            // "point this koi out": close the panel and let every pond ripple around her for a few seconds.
+            if (json.StartsWith("panel-find:"))
+            {
+                panelWindow?.Dismiss();
+                Broadcast("{\"find\":\"" + json.Substring("panel-find:".Length) + "\"}");
+                return;
+            }
             OnSave(view, json);
         }
 
