@@ -5,6 +5,7 @@
   const { halfWidth, girthOf } = root.PondArt;
   const TAU = Math.PI * 2;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+  const smoothstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
   // Things above the water in the supplied painting (assets/pond.jpg, 2560×1440).
   // [x, y, rx, kind, ry, rotation]; l = lotus/pennywort leaf, f = flower or petal, b = lotus bud, r = rock breaking the surface.
@@ -30,10 +31,17 @@
     autumn: [['lotusYellowLeaf',-57,17,.9,-.4],['lotusYellowLeaf',13,33,.88,.35],['lotusDryLeaf',60,4,.7,-.8],['lotusPod',-15,-4,.86,-.14],['lotusPod',47,-19,.64,.25]],
     winter: [['lotusDryLeaf',-53,25,.7,-.4],['lotusDryLeaf',32,32,.54,.4],['lotusStem',-22,25,.95,-.1],['lotusStem',55,22,.73,.2],['lotusDryPod',-24,7,.74,-.22],['lotusDryPod',35,9,.62,.18]]
   };
+  // Seconds the summer bud takes to open into a second flower: slow enough to read as a lotus
+  // opening, not as a sprite swap.
+  const LOTUS_BLOOM = 60;
+  // After each flower opens, another stalk rises out of the water, grows for this long, and opens in
+  // turn. Three of them follow the pond's own bud, so a summer ends with five lotus flowers.
+  const LOTUS_GROW = 40;
+  const SUMMER_BUDS = [[-85,-10,.8,-.2],[-45,68,.76,.5],[110,-40,.7,.9]];
   // Species already in the atlas: white/yellow/swallowtail butterflies, red/blue dragonflies.
   const SEASONAL_INSECTS = {
     spring: { butterflies: [0, 1], dragonflies: [0], fireflies: 0 },
-    summer: { butterflies: [0, 1, 2], dragonflies: [0, 1], fireflies: 14 },
+    summer: { butterflies: [0, 1, 2], dragonflies: [0, 1], fireflies: 60 },
     autumn: { butterflies: [1], dragonflies: [0], fireflies: 0 },
     winter: { butterflies: [], dragonflies: [], fireflies: 0 }
   };
@@ -92,7 +100,8 @@
   const TURTLE_CLEARANCE = 34;
   class Turtle {
     constructor(variant, rnd) {
-      Object.assign(this, { variant, rnd, x: .25 + rnd() * .5, y: .3 + rnd() * .45, angle: rnd() * TAU, v: 0, turn: 0, stroke: rnd() * TAU, depth: .5, depthGoal: .5, goal: null, goalTime: 0, rest: 2 + rnd() * 4, breath: 20 + rnd() * 30, surfaced: 0, look: 0, lookGoal: 0, neck: 1, size: 1.08 + rnd() * .14, bubble: 0 });
+      // 0.8× the old shell: the pond's turtles read as too big beside the koi.
+      Object.assign(this, { variant, rnd, x: .25 + rnd() * .5, y: .3 + rnd() * .45, angle: rnd() * TAU, v: 0, turn: 0, stroke: rnd() * TAU, depth: .5, depthGoal: .5, goal: null, goalTime: 0, rest: 2 + rnd() * 4, breath: 20 + rnd() * 30, surfaced: 0, look: 0, lookGoal: 0, neck: 1, size: (1.08 + rnd() * .14) * .8, bubble: 0 });
     }
     startle(x, y, w, h, radius, habitat) {
       const px = this.x * w, py = this.y * h;
@@ -369,8 +378,9 @@
       this.butterflies = [0, 1, 2].map(s => new Butterfly(s, rnd));
       this.dragonflies = [0, 1].map(s => new Dragonfly(s, rnd));
       this.crabs = [0, 1, 0].map(v => new Crab(v, rnd)); this.crabHomes = [];
-      this.petals = []; this.flies = []; this.rain = []; this.snow = []; this.splashes = []; this.wakes = new Map();
+      this.petals = []; this.flies = []; this.lures = []; this.rain = []; this.snow = []; this.splashes = []; this.motes = []; this.wakes = new Map();
       this.lotusPlants = []; this.plantRipples = []; this.waterRipples = [];
+      this.lotusBuds = []; this.bloomStart = 0; this.lanterns = []; this.sparkles = [];
       this.setSeason('spring');
       // Lightning in a downpour; each flash asks the app for the thunder that follows it.
       this.bolts = []; this.nextBolt = 15; this.events = []; this.calm = !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -394,11 +404,13 @@
       this.lotusDefs=this.floaterDefs.filter(f=>f[3]==='f'&&f[2]>25);
       const rnd=this.rnd,rank=f=>({r:0,l:1,f:f[2]>25?4:2,b:3})[f[3]];
       this.drifters = driftDefs.map(d => ({ ...d, x: 0, y: 0, a: 0, vx: 0, vy: 0, flow: rnd() * TAU, aim: rnd() * TAU, turnIn: 5 + rnd() * 9, speed: 2.8 + rnd() * 2.8, spin: (rnd() - .5) * .12, phase: rnd() * TAU, visible: false }));
-      this.floaters=this.floaterDefs.map(f=>({f,p:[rnd()*TAU,rnd()*TAU,rnd()*TAU,rnd()*TAU],sp:.8+rnd()*.4,seed:rnd(),ja:0,jv:0,ox:0,oy:0,vx:0,vy:0,dx:0,dy:0})).sort((a,b)=>rank(a.f)-rank(b.f)||b.f[2]-a.f[2]);
+      this.floaters=this.floaterDefs.map(f=>({f,p:[rnd()*TAU,rnd()*TAU,rnd()*TAU,rnd()*TAU],sp:.8+rnd()*.4,seed:rnd(),snow:1,ja:0,jv:0,ox:0,oy:0,vx:0,vy:0,dx:0,dy:0})).sort((a,b)=>rank(a.f)-rank(b.f)||b.f[2]-a.f[2]);
       this.crabHomeDefs=this.season==='spring'?CRAB_HOMES:this.floaterDefs.filter(f=>f[3]==='r').map(([x,y,rx,,ry])=>[x,y,rx*.6,ry*.6]);
       for(const c of this.crabs){c.homes=this.crabHomeDefs;c.home=0;c.state='hidden';c.alpha=0;c.timer=1+rnd()*5;}
       this.petals.length=0;this.splashes.length=0;this.rain.length=0;this.wakes.clear();this.waterRipples.length=0;
       this.snowCover=0;this.wetCover=0;
+      // A new summer starts with its bud closed again and grows its next stalks from scratch.
+      this.bloomStart=this.time;this.lotusBuds=[];
     }
     butterflyWeather(settings) { return this.activeButterflies.length > 0 && settings.butterflies && !settings.night && settings.weather === 'sunny'; }
     dragonflyWeather(settings) { return this.activeDragonflies.length > 0 && settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
@@ -495,6 +507,164 @@
       const light = kind === 'b' ? 3 : kind === 'f' ? (rx > 25 ? 1.2 : 2) : clamp(22 / rx, .25, 1.6), side = (rnd() < .5 ? -1 : 1) * (.4 + r);
       fl.jv += side * .045 * light * 8; fl.vx -= Math.cos(a) * r * light * 9; fl.vy -= Math.sin(a) * r * light * 9;
     }
+    // A hand on the pond's plants: the lotus dips, rain water runs off a wet leaf, settled snow slides
+    // off a rock or floating flower, and summer fireflies bolt away. True when the tap hit a plant.
+    touchSeasons(x, y) {
+      this.disturbFlies(x, y, 110 * this.scale);
+      for (const p of this.lotusPlants) {
+        if (Math.hypot(p.x - x, p.y - y) > p.r * .92) continue;
+        const dx = x - p.x, dy = y - p.y;
+        p.vx += dx * .55; p.vy += dy * .55;
+        p.jv += clamp(dx * .02, -.3, .3); p.bv += 10;
+        this.splash(p.x + dx * .25, p.y + dy * .25, .45, p.leaf);
+        if (p.leaf && p.water > .15) this.pourLeaf(p, dx, dy);
+        return true;
+      }
+      // Detached flowers and rocks: an ellipse in the painting, moved by the same wind offsets as its drawing.
+      const [x0, y0] = this.R.imageToScreen(0, 0), [x1, y1] = this.R.imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0);
+      for (const fl of this.floaters) {
+        const f = fl.f, kind = f[3], rx = f[2] * 1.08 * k, ry = (f[4] || f[2]) * 1.08 * k;
+        const [sx, sy] = this.R.imageToScreen(f[0], f[1]), cx = sx + fl.dx, cy = sy + fl.dy, rot = f[5] || 0;
+        const ca = Math.cos(-rot), sa = Math.sin(-rot), px = x - cx, py = y - cy, ex = px * ca - py * sa, ey = px * sa + py * ca;
+        if (ex * ex / (rx * rx) + ey * ey / (ry * ry) > 1) continue;
+        this.splash(x, y, kind === 'r' ? .55 : .4, kind !== 'r');
+        // Snow that has settled on it can be knocked off; it fills back in while the snow keeps falling.
+        if (this.snowCover > .06 && (fl.snow ?? 1) > .25 && kind !== 'b') {
+          fl.snow = 0;
+          for (let i = 0; i < 7; i++) {
+            const a = this.rnd() * TAU, v = (26 + this.rnd() * 46) * this.scale;
+            this.motes.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 18 * this.scale, g: 40 * this.scale, age: 0, life: .6 + this.rnd() * .45, s: (.6 + this.rnd() * .4) * this.scale, snow: true });
+          }
+        } else {
+          fl.jv += (this.rnd() - .5) * .35; fl.vx += (x - cx) * .35; fl.vy += (y - cy) * .35;
+        }
+        return true;
+      }
+      return false;
+    }
+    // Water gathered on a lotus leaf runs off its rim once the leaf is tipped, leaving rings below.
+    pourLeaf(p, dx, dy) {
+      const rnd = this.rnd, s = this.scale, base = Math.atan2(dy, dx), amount = p.water || 0;
+      p.water = Math.max(0, amount - .3);
+      for (let i = 0; i < 5 + Math.round(amount * 5); i++) {
+        const a = base + (rnd() - .5) * 1.9, ex = p.x + Math.cos(a) * p.r * .78, ey = p.y + Math.sin(a) * p.r * .58;
+        this.motes.push({ x: ex, y: ey, vx: Math.cos(a) * 30 * s, vy: Math.sin(a) * 30 * s + 18 * s, g: 26 * s, age: 0, life: .6 + rnd() * .4, s: (.55 + rnd() * .35) * s });
+      }
+      for (let i = 0; i < 2 + Math.round(amount * 2); i++) {
+        const a = base + (rnd() - .5) * 1.3;
+        this.drop(p.x + Math.cos(a) * p.r * 1.05, p.y + Math.sin(a) * p.r * .75, 5 * s, .3);
+      }
+      p.jv += Math.cos(base) * .12;
+    }
+    // The moon's reflection is where a lantern is set adrift; anywhere else a tap still feeds the koi.
+    moonLanternSpot(x, y) {
+      return !!this.look.moon && Math.hypot(x - this.moonAt[0], y - this.moonAt[1]) < Math.max(90, 130 * this.scale);
+    }
+    releaseLantern(x, y) {
+      const safe = this.sim.habitat ? this.sim.habitat.project(x, y, 14 * this.scale) : [x, y];
+      if (!safe) return false;
+      const rnd = this.rnd, s = (.62 + rnd() * .1) * this.scale;
+      // A lantern drifts on the pond for fifteen minutes before it goes out (faster once daylight returns).
+      this.lanterns.push({ x: safe[0], y: safe[1], a: rnd() * TAU, flow: rnd() * TAU, phase: rnd() * TAU, spin: (rnd() - .5) * .06, age: 0, life: 15 * 60, s, r: 22 * s, vx: 0, vy: 0, bump: 0 });
+      if (this.lanterns.length > 5) this.lanterns.shift();
+      this.drop(safe[0], safe[1], 8 * this.scale, .45);
+      return true;
+    }
+    // Moonlight scattered when the surface is disturbed at night: every glint belongs to the ring the
+    // tap sends out, starting near the touch and riding its own bearing outward with the wave, then
+    // twinkling away. Daylight and a still pond leave nothing behind.
+    glimmer(x, y, k = 1) {
+      const moon = this.look.moon || 0;
+      if (!moon || !this.sim.isWater(x, y, 4)) return;
+      const rnd = this.rnd, n = Math.round((16 + rnd() * 12) * k), s = this.scale;
+      // Match the ripple's own speed (≈186 px/s on the WebGL grid, 60 px/s on the Canvas fallback)
+      // so the glints ride the ring instead of lagging behind it.
+      const speed = this.R.ripples ? 190 : 64;
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * TAU;
+        this.sparkles.push({
+          cx: x, cy: y, a,
+          r: (4 + rnd() * 22) * s,
+          vr: speed * (.88 + rnd() * .24),
+          drift: (rnd() - .5) * .5,
+          age: 0, life: 1.15 + rnd() * 1,
+          s: (.26 + rnd() * .7) * s * (.85 + .3 * k),
+          ph: rnd() * TAU, fq: 7 + rnd() * 11
+        });
+      }
+      // Dragging across the pond can paint a lot of sparks; keep the batch bounded.
+      if (this.sparkles.length > 260) this.sparkles.splice(0, this.sparkles.length - 260);
+    }
+    // Lanterns and the floating blossoms bump instead of sliding through one another: both take a small
+    // shove, a ripple marks the meeting point, and they carry on with the current. Painted flowers that
+    // are part of the surface only turn the lantern aside.
+    separateLanterns() {
+      if (!this.lanterns.length) return;
+      const k = this.scale, rnd = this.rnd;
+      const settle = (o, r) => {
+        if (!this.sim.habitat) return;
+        const safe = this.sim.habitat.project(o.x, o.y, r);
+        if (safe) { o.x = safe[0]; o.y = safe[1]; }
+      };
+      for (let i = 0; i < this.lanterns.length; i++) {
+        const l = this.lanterns[i];
+        for (let j = i + 1; j < this.lanterns.length; j++) {
+          const o = this.lanterns[j], dx = o.x - l.x, dy = o.y - l.y, d = Math.hypot(dx, dy), min = l.r + o.r;
+          if (d >= min) continue;
+          const a = d > .01 ? Math.atan2(dy, dx) : rnd() * TAU, nx = Math.cos(a), ny = Math.sin(a), push = (min - d) * .5;
+          l.x -= nx * push; l.y -= ny * push; o.x += nx * push; o.y += ny * push;
+          l.vx -= nx * 22 * k; l.vy -= ny * 22 * k; o.vx += nx * 22 * k; o.vy += ny * 22 * k;
+        }
+        for (const p of this.drifters) {
+          if (!p.visible) continue;
+          const dx = p.x - l.x, dy = p.y - l.y, d = Math.hypot(dx, dy), min = l.r + p.r * .78;
+          if (d >= min) continue;
+          const a = d > .01 ? Math.atan2(dy, dx) : rnd() * TAU, nx = Math.cos(a), ny = Math.sin(a), push = min - d;
+          l.x -= nx * push * .55; l.y -= ny * push * .55;
+          p.x += nx * push * .45; p.y += ny * push * .45;
+          l.vx -= nx * 24 * k; l.vy -= ny * 24 * k; l.flow = Math.atan2(-ny, -nx) + (rnd() - .5) * .4;
+          p.vx += nx * 30 * k; p.vy += ny * 30 * k;
+          p.aim = Math.atan2(ny, nx) + (rnd() - .5) * .7; p.turnIn = 3 + rnd() * 4;
+          settle(p, p.r);
+          if (this.time > (l.bump || 0)) { l.bump = this.time + .7; this.drop((l.x + p.x) / 2, (l.y + p.y) / 2, 6 * k, .2); }
+        }
+        for (const fl of this.floaters) {
+          const f = fl.f, kind = f[3];
+          if (kind !== 'f' && kind !== 'b') continue;
+          const [sx, sy] = this.R.imageToScreen(f[0], f[1]), cx = sx + fl.dx, cy = sy + fl.dy;
+          const rr = Math.max(f[2], f[4] || f[2]) * this.driftBasis.k * 1.08;
+          const dx = l.x - cx, dy = l.y - cy, d = Math.hypot(dx, dy), min = l.r + rr * .55;
+          if (d >= min) continue;
+          const a = d > .01 ? Math.atan2(dy, dx) : rnd() * TAU, nx = Math.cos(a), ny = Math.sin(a);
+          l.x = cx + nx * min; l.y = cy + ny * min;
+          l.vx += nx * 26 * k; l.vy += ny * 26 * k;
+          l.flow = Math.atan2(ny, nx) + (rnd() - .5) * .5;
+          if (this.time > (l.bump || 0)) { l.bump = this.time + .7; this.drop(l.x, l.y, 5 * k, .16); }
+        }
+        settle(l, 12 * k);
+      }
+    }
+    // A hand-held light for a summer night: fireflies inside its glow steer over and circle it. Only one
+    // is ever held, so summoning again moves that same light instead of stacking a brighter one.
+    summonLure(x, y) {
+      const lure = this.lures[0];
+      if (lure) Object.assign(lure, { x, y, age: 0 });
+      else this.lures.push({ x, y, age: 0, life: 10 });
+      return true;
+    }
+    // Full for a breath, then a long dim tail; the circle of influence narrows with it.
+    lureGlow(l) { const t = clamp(l.age / l.life, 0, 1); return Math.min(1, l.age / .7) * (1 - t) * (1 - t * .35); }
+    // Fireflies scatter from a hand or a dropping pellet, then settle back into their slow wander.
+    disturbFlies(x, y, radius) {
+      for (const f of this.flies) {
+        const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy);
+        if (d > radius) continue;
+        const k = 1 - d / radius;
+        f.a = Math.atan2(dy, dx) + (this.rnd() - .5) * .6;
+        f.x += (dx / (d || 1)) * 22 * k; f.y += (dy / (d || 1)) * 22 * k;
+        f.p += .9 * k; f.kick = Math.max(f.kick || 0, 1.4 * k);
+      }
+    }
     layout(w, h) {
       this.w = w; this.h = h; this.scale = clamp(Math.min(w, h) / 800, .62, 1.12);
       this.rain.length = 0;
@@ -527,6 +697,12 @@
         const safe = this.sim.habitat.project(p.x, p.y, p.r);
         if (safe) [p.x, p.y] = safe; else p.age = p.life;
       }
+      // Lanterns keep their place in the pond when the window changes shape; one that can no longer
+      // find open water goes out.
+      for (const l of this.lanterns) {
+        const safe = this.sim.habitat.project(l.x, l.y, 12 * this.scale);
+        if (safe) [l.x, l.y] = safe; else l.age = l.life;
+      }
       // Keep the patch in the visible lower-left corner even when the pond rotates on a phone.
       // Project the whole plant's footprint into water, away from rocks and the dry bank.
       this.plantRipples.length = 0;
@@ -534,12 +710,19 @@
       this.lotusPlants=LOTUS_PLANTS[this.season].map(([sprite,dx,dy,size,angle],i)=>{
         const s=size*this.scale,leaf=sprite.includes('Leaf'),r=(leaf?48:sprite==='lotusStem'?82:72)*s,motionMargin=20*this.scale;
         const [x,y]=this.sim.habitat.project(ix+dx*this.scale,iy+dy*this.scale,r+motionMargin);
-        return {sprite,x,y,s,angle,phase:i*2.17,r,leaf,motionMargin,rootOffset:sprite==='lotusFlower'?30*s:0,ox:0,oy:0,vx:0,vy:0,ja:0,jv:0,bend:0,bv:0};
+        return {sprite,x,y,s,angle,phase:i*2.17,r,leaf,motionMargin,rootOffset:sprite==='lotusFlower'?30*s:0,water:leaf?.35:0,pool:leaf?.35:0,ox:0,oy:0,vx:0,vy:0,ja:0,jv:0,bend:0,bv:0};
       });
       for(const p of this.lotusPlants){
         if(p.sprite==='lotusFlower'||p.sprite==='lotusLeaf')this.spots.push([p.x,p.y]);
         if(p.sprite==='lotusBud')this.buds.push([p.x,p.y-15*p.s]);
       }
+      // Stalks the summer has yet to grow, each with its own patch of open water beside the leaves.
+      this.lotusBuds=this.season==='summer'?SUMMER_BUDS.map(([dx,dy,size,angle],i)=>{
+        const s=size*this.scale,r=72*s,motionMargin=20*this.scale;
+        const at=this.sim.habitat.project(ix+dx*this.scale,iy+dy*this.scale,r+motionMargin);
+        if(!at)return null;
+        return {sprite:'lotusBud',gen:i+1,x:at[0],y:at[1],s,angle,phase:(i+2)*2.17,r,leaf:false,motionMargin,rootOffset:0,ox:0,oy:0,vx:0,vy:0,ja:0,jv:0,bend:0,bv:0};
+      }).filter(Boolean):[];
       // Leaves, flowers and rocks on screen, weighted by area, for raindrops to land on.
       this.targets = []; this.targetArea = 0;
       for (const fl of this.floaters) {
@@ -555,8 +738,11 @@
       for (const b of this.butterflies) { if (b.x < 0) { b.x = this.rnd() * w; b.y = this.rnd() * h; } else { b.x *= w / this.prevW; b.y *= h / this.prevH; } b.target = null; b.state = 'fly'; }
       this.prevW = w; this.prevH = h;
     }
-    setLook(weather, night, dt, amounts = {}) {
-      const target = lookFor(weather, night, amounts.rainAmount, amounts.snowAmount);
+    setLook(weather, night, dt, amounts = {}, nightK = night ? 1 : 0) {
+      // twilight: blend the day and night palettes, so following a city's sunset dims the pond by
+      // degrees instead of flipping the whole picture in one frame.
+      const target = lookFor(weather, false, amounts.rainAmount, amounts.snowAmount);
+      if (nightK > 0) lerpLook(target, lookFor(weather, true, amounts.rainAmount, amounts.snowAmount), clamp(nightK, 0, 1));
       if (dt === undefined) { const dir = this.look.shadowDir; this.look = target; this.look.shadowDir = dir; }
       else lerpLook(this.look, target, 1 - Math.exp(-dt * 1.1));
       // Clear skies remove the previous weather's clouds immediately; lighting still eases toward sunlight.
@@ -590,6 +776,12 @@
       this.wetCover = settings.weather === 'rain' ? Math.min(1, (this.wetCover || 0) + dt * (.04 + .1 * rainK)) : Math.max(0, (this.wetCover || 0) - dt * .02);
       this.look.wetCover = this.wetCover;
       const { w, h, scale, rnd } = this, weather = settings.weather;
+      // Rain gathers in the hollow of each lotus leaf and dries off slowly; the visible pool follows
+      // the stored amount with a little lag, so tipping a leaf drains it instead of snapping.
+      for (const p of this.lotusPlants) if (p.leaf) {
+        p.water = weather === 'rain' ? Math.min(1, p.water + dt * (.12 + .22 * rainK)) : Math.max(0, p.water - dt * .006);
+        p.pool += (p.water - p.pool) * Math.min(1, dt * 2.2);
+      }
       if (settings.turtles) for (const t of this.turtles) t.update(dt, w, h, scale, this);
       // Crabs come out in any weather but snow.
       const crabsOut = settings.crabs !== false && weather !== 'snow';
@@ -600,7 +792,30 @@
       const wantFlies = this.fireflyWeather(settings) ? this.insects.fireflies : 0;
       while (this.flies.length < wantFlies) this.flies.push({ x: rnd() * w, y: rnd() * h, a: rnd() * TAU, p: rnd() * TAU, s: .7 + rnd() * .6 });
       if (this.flies.length > wantFlies) this.flies.length = wantFlies;
-      for (const f of this.flies) { f.a += (rnd() - .5) * dt * 2; f.x += Math.cos(f.a) * 14 * dt; f.y += Math.sin(f.a) * 14 * dt; f.p += dt; if (f.x < 0 || f.x > w || f.y < 0 || f.y > h) f.a += Math.PI; }
+      // A summoned light: it fades in, then its glow and reach narrow until it goes out. Fireflies within
+      // reach turn toward it and circle instead of piling into the middle.
+      for (const l of this.lures) l.age += dt;
+      if (!this.fireflyWeather(settings)) this.lures.length = 0;
+      this.lures = this.lures.filter(l => l.age < l.life);
+      const lure = this.lures[0], glow = lure ? this.lureGlow(lure) : 0, reach = lure ? 460 * scale * (1 - .45 * lure.age / lure.life) : 0;
+      for (const f of this.flies) {
+        const kick = 1 + (f.kick || 0) * 3.2;
+        let speed = 14, noise = 2;
+        if (glow > .01) {
+          const dx = lure.x - f.x, dy = lure.y - f.y, d = Math.hypot(dx, dy);
+          if (d < reach) {
+            // Far off it hurries; close in it slows to circle the light rather than shoot through it.
+            const want = Math.atan2(dy, dx) + (d < 30 * scale ? Math.PI * .5 : 0);
+            const turn = Math.atan2(Math.sin(want - f.a), Math.cos(want - f.a));
+            f.a += turn * Math.min(1, dt * (1.4 + 4 * glow));
+            speed += 42 * glow * (.35 + .65 * Math.min(1, d / (reach * .5)));
+            noise *= .35;
+          }
+        }
+        f.a += (rnd() - .5) * dt * noise; f.x += Math.cos(f.a) * speed * dt * kick; f.y += Math.sin(f.a) * speed * dt * kick; f.p += dt;
+        if (f.kick) f.kick = Math.max(0, f.kick - dt * 1.6);
+        if (f.x < 0 || f.x > w || f.y < 0 || f.y > h) f.a += Math.PI;
+      }
       // Detached flowers and leaves follow a slow changing current; ripples can nudge them.
       for (const p of this.drifters) if (p.visible) { this.driftParticle(p, dt, p.s); this.rememberDrifter(p); }
       if (this.petals.length < 2 && rnd() < dt * .015) {
@@ -610,6 +825,28 @@
       }
       for (const p of this.petals) { p.age += dt; this.driftParticle(p, dt, scale); }
       this.petals = this.petals.filter(p => p.age < p.life);
+      // River lanterns drift on the same slow current, turn away from the bank, and go out after a while
+      // or once the moon is gone and daylight returns.
+      for (const l of this.lanterns) {
+        l.age += dt; l.phase += dt; l.a += l.spin * dt; l.flow += (rnd() - .5) * dt * .6;
+        l.vx *= Math.exp(-dt * 1.8); l.vy *= Math.exp(-dt * 1.8);
+        const nx = l.x + (Math.cos(l.flow) * 7 * scale + l.vx) * dt, ny = l.y + (Math.sin(l.flow * .8) * 6 * scale + l.vy) * dt;
+        if (this.sim.isWater(nx, ny, 12 * scale)) { l.x = nx; l.y = ny; }
+        else { l.flow += Math.PI * (.5 + rnd() * .5); l.vx *= -.35; l.vy *= -.35; }
+        if (!this.look.moon) l.age += dt * 6;
+      }
+      this.lanterns = this.lanterns.filter(l => l.age < l.life);
+      this.separateLanterns();
+      // Moonlight glints ride the wave front at the ripple's own speed, so they stay on the ring as
+      // it widens; one carried onto the bank goes out with the wave.
+      for (const p of this.sparkles) {
+        p.age += dt;
+        p.r += p.vr * dt;
+        p.a += p.drift * dt;
+        const x = p.cx + Math.cos(p.a) * p.r, y = p.cy + Math.sin(p.a) * p.r;
+        if (!this.sim.isWater(x, y, 2)) p.age = p.life;
+      }
+      if (this.sparkles.length) this.sparkles = this.sparkles.filter(p => p.age < p.life);
       // Rain streaks and drops; snowflakes melting into the pond.
       const rainN = weather === 'rain' ? Math.round((30 + 190 * rainK) * Math.min(1, w * h / 1.2e6) + 20) : 0;
       this.rainK = rainK; this.look.rainK = weather === 'rain' ? rainK : 0;
@@ -637,6 +874,11 @@
       }
       for (const p of this.splashes) { p.age += dt; if (!p.ring) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.exp(-dt * 7); p.vy *= Math.exp(-dt * 7); } }
       this.splashes = this.splashes.filter(p => p.age < p.life);
+      // Water sluiced off a leaf and snow knocked off a rock: a few motes that fall and fade.
+      for (const p of this.motes) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= Math.exp(-dt * 1.6); }
+      this.motes = this.motes.filter(p => p.age < p.life);
+      // Snow brushed off a rock or flower fills back in as long as it keeps falling.
+      if (settings.weather === 'snow') for (const fl of this.floaters) if ((fl.snow ?? 1) < 1) fl.snow = Math.min(1, fl.snow + dt * .05);
       // Now and then in a heavy downpour the sky flickers white, and thunder rolls in a moment later.
       // Rain heavier than the default setting rolls thunder; the default (.5) already qualifies, so a plain
       // "下雨" is enough to see it.
@@ -740,6 +982,32 @@
         bend: ((p.leaf ? 1.7 : 3.8) * gust * wind + p.bend) * unit
       };
     }
+    // One lotus sprite with its shadow; alpha lets a bud dissolve into a flower as it opens.
+    plantSprite(def, x, y, angle, sx, sy, bend, leaf, off, alpha) {
+      if (alpha <= .01) return;
+      const R = this.R, look = this.look;
+      R.plant('plantShadow', def, x + look.shadowDir[0] * off, y + look.shadowDir[1] * off, angle, sx, sy, bend, leaf, this.scale, [0, 0, 0, (leaf ? .36 : .22) * alpha], [leaf ? .35 : .7, 0, 0, 0]);
+      R.plant('plants', def, x, y, angle, sx, sy, bend, leaf, this.scale, [1, 1, 1, alpha]);
+    }
+    // The summer runs a relay of blooms: the pond's own bud opens first (gen 0), then each new stalk
+    // rises for LOTUS_GROW seconds and opens for LOTUS_BLOOM. null until that stalk has started.
+    lotusStage(gen) {
+      const t = this.time - this.bloomStart, B = LOTUS_BLOOM, G = LOTUS_GROW;
+      if (gen === 0) return { grow: 1, open: clamp(t / B, 0, 1) };
+      const start = gen * B + (gen - 1) * G;
+      if (t < start) return null;
+      return { grow: .15 + .85 * smoothstep(0, 1, clamp((t - start) / G, 0, 1)), open: clamp((t - start - G) / B, 0, 1) };
+    }
+    // A lotus bud that grows out of the water and opens: petals spread from inside the bud while it
+    // dissolves. The flower is painted opaque, under the bud, so it never looks see-through.
+    drawLotusBloom(def, x, y, angle, sx, sy, bend, leaf, off, open, grow = 1) {
+      const flower = this.R.sprites.lotusFlower, bud = 1 - smoothstep(.15, .6, open);
+      if (open > 0 && flower) {
+        const k = (.35 + .65 * smoothstep(0, 1, open)) * grow;
+        this.plantSprite(flower, x, y, angle, sx * k, sy * k, bend, leaf, off, 1);
+      }
+      if (bud > .01) this.plantSprite(def, x, y, angle, sx * grow, sy * grow, bend, leaf, off, bud);
+    }
     bodyLight(f) {
       if (!f.light || f.light.seed !== f.seed || f.light.palette !== f.palette || f.light.species !== f.species) {
         const girth = girthOf(f.seed), widths = new Float32Array(BODY.segments + 1), kind = fishPalette(f).kind;
@@ -786,11 +1054,11 @@
         const { f, p, sp } = fl;
         const [x, y, rx, kind, ry = rx, rot = 0] = f;
         const gr = grow(f);
-        if (kind === 'r') { R.floater(x, y, rx, ry, rot, 0, 0, 0, 0, 1, 0, 0, fl.seed); continue; }
+        if (kind === 'r') { R.floater(x, y, rx, ry, rot, 0, 0, 0, 0, fl.snow ?? 1, 0, 0, fl.seed); continue; }
         const big = kind === 'l' && rx > 30, petal = kind === 'f' && rx <= 25, turn = big ? .032 : kind === 'b' ? .13 : kind === 'f' && !petal ? .085 : .075, move = (big ? 1.6 : kind === 'b' ? 3.2 : 2.4) * scale * gust;
         const angle = (turn * Math.sin(t * .33 * sp + p[0]) + turn * .4 * Math.sin(t * .91 * sp + p[1])) * gust;
         fl.dx = move * Math.sin(t * .29 * sp + p[2]) + fl.ox * scale; fl.dy = move * Math.cos(t * .23 * sp + p[3]) + fl.oy * scale;
-        R.floater(x, y, rx * gr, ry * gr, rot, angle + fl.ja, fl.dx, fl.dy, (big ? 1.8 : petal ? 3.5 : 2.6) * scale, big ? 1 : kind === 'l' ? .6 : .32, kind === 'l' ? 1 : .45, big ? 1 : 0, fl.seed);
+        R.floater(x, y, rx * gr, ry * gr, rot, angle + fl.ja, fl.dx, fl.dy, (big ? 1.8 : petal ? 3.5 : 2.6) * scale, (big ? 1 : kind === 'l' ? .6 : .32) * (fl.snow ?? 1), kind === 'l' ? 1 : .45, big ? 1 : 0, fl.seed);
       }
       // Paint the original detached flowers and leaves at their drifting positions, with pond lighting.
       for (const p of this.drifters) if (p.visible && R.sprites[p.sprite]) {
@@ -800,9 +1068,28 @@
       }
       // Seasonal lotus leaves float over fish; flowers and seed heads sway above them.
       for(const p of this.lotusPlants){
-        const def=R.sprites[p.sprite],{x,y,angle,sy,bend}=this.plantPose(p),off=(p.leaf?2:6)*scale;
-        R.plant('plantShadow',def,x+look.shadowDir[0]*off,y+look.shadowDir[1]*off,angle,p.s,sy,bend,p.leaf,scale,[0,0,0,p.leaf?.36:.22],[p.leaf?.35:.7,0,0,0]);
-        R.plant('plants',def,x,y,angle,p.s,sy,bend,p.leaf,scale);
+        const def=R.sprites[p.sprite];
+        if(!def)continue;
+        const {x,y,angle,sy,bend}=this.plantPose(p),off=(p.leaf?2:6)*scale;
+        // The summer bud opens into the pond's first new flower, then hands over to the next stalk.
+        if(p.sprite==='lotusBud'){
+          const stage=this.lotusStage(0);
+          this.drawLotusBloom(def,x,y,angle,p.s,sy,bend,p.leaf,off,stage.open,stage.grow);
+          continue;
+        }
+        this.plantSprite(def,x,y,angle,p.s,sy,bend,p.leaf,off,1);
+        // The rain water gathered in a leaf rides on top of it, shrinking as the leaf is tipped.
+        if(p.leaf&&p.pool>.02&&R.sprites.leafWater){
+          const w=p.s*(.5+.16*p.pool);
+          R.sprite('plants',R.sprites.leafWater,x,y-1.2*scale,angle,w,w*.75,[1,1,1,.32+.55*p.pool]);
+        }
+      }
+      // The stalks that follow: each one rises out of the water, then opens like the first.
+      for(const p of this.lotusBuds){
+        const stage=this.lotusStage(p.gen),def=R.sprites[p.sprite];
+        if(!stage||!def)continue;
+        const {x,y,angle,sy,bend}=this.plantPose(p);
+        this.drawLotusBloom(def,x,y,angle,p.s,sy,bend,p.leaf,6*scale,stage.open,stage.grow);
       }
       // Floating: petals and food.
       for (const p of this.petals) {
@@ -816,7 +1103,38 @@
         R.sprite('shadow', R.sprites.dot, p.x + look.shadowDir[0] * 9 * scale, p.y + look.shadowDir[1] * 9 * scale, 0, s * .45, s * .45, [0, 0, 0, .5 * fade]);
         R.sprite('surface', R.sprites.pellet, p.x, p.y, p.drift, s, s, [...lit, fade]);
       }
+      // River lanterns set adrift on the moon's reflection: soft paper petals over a warm pool of light,
+      // with only a whisper of glow above so the painted petals are never washed out white.
+      for (const l of this.lanterns) {
+        const fade = Math.min(1, l.age / 1.2, (l.life - l.age) / 4);
+        if (fade <= .01 || !R.sprites.lantern) continue;
+        const bob = Math.sin(this.time * 1.5 + l.phase) * .9 * scale, s = l.s * (1 + .02 * Math.sin(this.time * 1.1 + l.phase));
+        R.sprite('surface', R.sprites.dot, l.x, l.y + bob, 0, 13 * s, 10 * s, [.92, .6, .32, fade * .55]);
+        R.sprite('surface', R.sprites.lantern, l.x, l.y + bob, l.a, s, s, [1.18, 1.08, 1, fade]);
+        R.sprite('glow', R.sprites.dot, l.x, l.y + bob, 0, 5 * s, 5 * s, [1, .62, .3, fade * .2]);
+      }
+      // Moonlight broken into glints on the ripple: blue-white sparks travel outward on the ring the
+      // touch made, twinkle as they go and dissolve, so the wave itself seems to catch the light.
+      if (this.sparkles.length) {
+        const moon = this.look.moon;
+        for (const p of this.sparkles) {
+          const fade = 1 - p.age / p.life, tw = .45 + .55 * Math.sin(p.age * p.fq + p.ph);
+          const a = Math.max(0, fade * tw) * moon;
+          if (a < .02) continue;
+          const x = p.cx + Math.cos(p.a) * p.r, y = p.cy + Math.sin(p.a) * p.r;
+          R.sprite('glow', R.sprites.dot, x, y, 0, p.s, p.s, [.6, .74, 1, a * .85]);
+        }
+      }
       for (const c of this.crabs) c.draw(R, scale, look);
+      // A summoned firefly light: a warm pool on the water with a soft halo above it.
+      for (const l of this.lures) {
+        const g = this.lureGlow(l);
+        if (g <= .01) continue;
+        const s = (5 + 4 * g) * scale;
+        if (this.sim.isWater(l.x, l.y, 4)) R.sprite('surface', R.sprites.dot, l.x, l.y, 0, 6 * s, 5 * s, [1, .78, .42, .22 * g]);
+        R.sprite('glow', R.sprites.dot, l.x, l.y, 0, s, s, [1, .8, .45, .45 * g]);
+        R.sprite('glow', R.sprites.dot, l.x, l.y, 0, .9, .9, [1, .92, .68, .85 * g]);
+      }
       // Air: butterflies or fireflies, rain, snow.
       if (this.butterflyWeather(settings)) for (const b of this.activeButterflies) b.draw(R, scale, look);
       if (this.dragonflyWeather(settings)) for (const d of this.activeDragonflies) d.draw(R, scale, look);
@@ -833,6 +1151,11 @@
         }
         else if (p.ring) { const r = p.s * (.25 + .75 * Math.sqrt(t)), a = Math.pow(1 - t, 1.6) * (p.leaf ? .75 : .45); R.sprite('surface', R.sprites.ring, p.x, p.y, 0, r, r * .9, [lit[0] * a, lit[1] * a, lit[2] * a, a]); }
         else { const a = (1 - t) * .8, r = p.s * .16 * (1 - t * .4); R.sprite('air', R.sprites.dot, p.x, p.y, 0, r, r, [a, a, a, a]); }
+      }
+      // Water sluiced off a leaf, and snow knocked off a rock: motes that fall and fade.
+      for (const p of this.motes) {
+        const a = Math.min(1, (p.life - p.age) * 4) * (p.snow ? .95 : .58);
+        R.sprite('air', R.sprites.dot, p.x, p.y, 0, p.s, p.s, [1, 1, 1, a]);
       }
       for (const f of this.snow) {
         const m = f.melt > 0 ? f.melt / .6 : 1, s = (.28 + f.z * 1.25) * scale * (f.melt > 0 ? .4 + .6 * m : 1), a = Math.min(1, f.age * 2) * m * (.55 + .4 * f.z), near = f.z > .82;

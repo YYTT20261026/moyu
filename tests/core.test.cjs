@@ -57,7 +57,9 @@ test('观鱼模式轻点水面，附近的鱼会受惊游开',()=>{
   const random=randomSeed(5),fish=createFish(0,random);fish.x=.5;fish.y=.5;fish.angle=0;
   const pond=new PondSimulation([fish],1000,700,random);pond.step(1/60);
   pond.scare(520,350);assert.ok(fish.flee>0);
-  for(let i=0;i<45;i++)pond.step(1/60);
+  // The escape is deliberately a hurried swim rather than a sprint now, so give it a little longer
+  // to clear the same 60px.
+  for(let i=0;i<60;i++)pond.step(1/60);
   assert.ok(Math.hypot(fish.x*1000-520,fish.y*700-350)>60);
 });
 test('锦鲤绕开荷叶丛',()=>{

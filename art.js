@@ -671,6 +671,75 @@
     ctx.strokeStyle = 'rgba(226,216,186,.65)'; ctx.lineWidth = .65; ctx.beginPath(); ctx.moveTo(21, 84); ctx.quadraticCurveTo(24, 49, 29, 24); ctx.stroke();
     return { canvas: c, ppu, px: .5, py: .86 };
   }
+  // A lotus lantern for moonlit water: pale paper petals round a small candle, seen from above.
+  // It follows the pond's painted flowers — soft, low-contrast edges, muted peach and rose, broken
+  // colour instead of flat vector fills — so it sits in the same picture as the lotuses.
+  function lanternSprite(ppu = 2) {
+    const c = canvas(60 * ppu, 60 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu); ctx.translate(30, 30);
+    const rnd = randomSeed(613), noise = valueNoise(37);
+    const petal = (angle, len, wide, inner, alpha) => {
+      ctx.save(); ctx.rotate(angle); ctx.globalAlpha = alpha;
+      // A rounded paper petal, not a pointed ray: the tip is a soft arc.
+      const p = new Path2D();
+      p.moveTo(0, 3.5);
+      p.bezierCurveTo(-wide, -len * .12, -wide * .95, -len * .62, -wide * .38, -len * .86);
+      p.quadraticCurveTo(0, -len, wide * .38, -len * .86);
+      p.bezierCurveTo(wide * .95, -len * .62, wide, -len * .12, 0, 3.5);
+      const g = ctx.createLinearGradient(0, 3.5, 0, -len);
+      if (inner) { g.addColorStop(0, '#fdeed9'); g.addColorStop(.5, '#f7d2ba'); g.addColorStop(1, '#e9ab90'); }
+      else { g.addColorStop(0, '#f2d8c6'); g.addColorStop(.45, '#ecc0ac'); g.addColorStop(.8, '#dc9c8a'); g.addColorStop(1, '#c98477'); }
+      ctx.fillStyle = g; ctx.fill(p);
+      // A whisper of a fold down the middle, and a lit paper edge at the tip.
+      ctx.globalAlpha = alpha * .38; ctx.strokeStyle = 'rgba(140,82,68,.9)'; ctx.lineWidth = .45;
+      ctx.beginPath(); ctx.moveTo(0, 1.5); ctx.quadraticCurveTo(wide * .1, -len * .45, 0, -len * .88); ctx.stroke();
+      ctx.globalAlpha = alpha * .32; ctx.strokeStyle = 'rgba(255,247,230,.95)'; ctx.lineWidth = .6; ctx.stroke(p);
+      ctx.restore();
+    };
+    for (let i = 0; i < 8; i++) petal(i / 8 * TAU + .1, 20 + Math.sin(i * 1.7) * 1.4, 8.4, false, .94);
+    for (let i = 0; i < 6; i++) petal((i + .45) / 6 * TAU, 13, 6.2, true, .92);
+    // The candle: a warm bloom behind the petals' heart, not a white-hot point.
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
+    glow.addColorStop(0, 'rgba(255,236,186,.85)'); glow.addColorStop(.42, 'rgba(247,197,130,.45)'); glow.addColorStop(1, 'rgba(226,164,102,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,242,204,.9)'; ctx.beginPath(); ctx.arc(0, 0, 1.7, 0, TAU); ctx.fill();
+    // Paper grain: tiny broken colour specks, the same brushwork as the flowers.
+    for (let i = 0; i < 150; i++) {
+      const a = rnd() * TAU, r = Math.sqrt(rnd()) * 20, x = Math.cos(a) * r, y = Math.sin(a) * r;
+      ctx.fillStyle = noise(x * .22, y * .22) > .5 ? 'rgba(255,246,226,.06)' : 'rgba(122,74,60,.06)';
+      ctx.fillRect(x, y, .8, .8);
+    }
+    // A hair of blur so the edge reads as painted, then the sprite is ready for the atlas.
+    const soft = canvas(60 * ppu, 60 * ppu), sc = soft.getContext('2d');
+    sc.filter = `blur(${.8 * ppu}px)`; sc.drawImage(c, 0, 0); sc.filter = 'none';
+    return { canvas: soft, ppu, px: .5, py: .5 };
+  }
+  // A shallow lens of rain water resting on a lotus leaf, seen from above: an irregular soft rim,
+  // the sky reflected across the top, a dark contact edge below and a small highlight on the surface.
+  function leafWaterSprite(ppu = 2) {
+    const c = canvas(56 * ppu, 42 * ppu), ctx = c.getContext('2d'); ctx.scale(ppu, ppu); ctx.translate(28, 21);
+    const p = new Path2D();
+    for (let i = 0; i <= 48; i++) {
+      const a = i / 48 * TAU, r = 1 + Math.sin(a * 3 + 1.2) * .04 + Math.cos(a * 5) * .03, x = Math.cos(a) * 20 * r, y = Math.sin(a) * 13 * r;
+      i ? p.lineTo(x, y) : p.moveTo(x, y);
+    }
+    p.closePath();
+    const g = ctx.createLinearGradient(0, -13, 0, 13);
+    g.addColorStop(0, 'rgba(214,238,232,.68)'); g.addColorStop(.45, 'rgba(150,190,183,.56)'); g.addColorStop(1, 'rgba(92,137,132,.6)');
+    ctx.fillStyle = g; ctx.fill(p);
+    ctx.save(); ctx.clip(p);
+    const sky = ctx.createLinearGradient(0, -13, 0, 2);
+    sky.addColorStop(0, 'rgba(238,249,242,.5)'); sky.addColorStop(1, 'rgba(238,249,242,0)');
+    ctx.fillStyle = sky; ctx.fillRect(-22, -14, 44, 18);
+    const dark = ctx.createLinearGradient(0, 3, 0, 13);
+    dark.addColorStop(0, 'rgba(36,74,72,0)'); dark.addColorStop(1, 'rgba(28,60,58,.32)');
+    ctx.fillStyle = dark; ctx.fillRect(-22, 2, 44, 12);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(228,248,240,.55)'; ctx.lineWidth = 1.1; ctx.stroke(p);
+    ctx.strokeStyle = 'rgba(255,255,250,.75)'; ctx.lineWidth = .5;
+    ctx.beginPath(); ctx.ellipse(-3, -3.5, 6.5, 2.4, -.35, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,250,.8)'; ctx.beginPath(); ctx.ellipse(2.5, 1, 1.6, .9, -.3, 0, TAU); ctx.fill();
+    return { canvas: c, ppu, px: .5, py: .5 };
+  }
   // Keep the original painting's silhouettes, but repaint their photographic texture
   // in broken colour planes and radial brush marks to match the new illustrated pond.
   // This work happens once, before the shared atlas is uploaded.
@@ -747,7 +816,7 @@
   }
   function miscSprites() {
     const s = { fin: finSprite(4, false), finMoto: finSprite(4, true), pellet: pelletSprite(), dot: dotSprite(), flake: flakeSprite(), streak: streakSprite(), ring: ringSprite(), petal: petalSprite() };
-    Object.assign(s, { lotusLeaf: lotusLeafSprite(), lotusYellowLeaf: lotusLeafSprite('yellow'), lotusDryLeaf: lotusLeafSprite('dry'), lotusFlower: lotusFlowerSprite(), lotusBud: lotusFlowerSprite(true), lotusPod: lotusPodSprite(), lotusDryPod: lotusPodSprite(true), lotusStem: lotusStemSprite() });
+    Object.assign(s, { lotusLeaf: lotusLeafSprite(), lotusYellowLeaf: lotusLeafSprite('yellow'), lotusDryLeaf: lotusLeafSprite('dry'), lotusFlower: lotusFlowerSprite(), lotusBud: lotusFlowerSprite(true), lotusPod: lotusPodSprite(), lotusDryPod: lotusPodSprite(true), lotusStem: lotusStemSprite(), lantern: lanternSprite(), leafWater: leafWaterSprite() });
     for (let v = 0; v < TURTLES.length; v++) { const t = turtleSprites(v); for (const k in t) s[`turtle${v}_${k}`] = t[k]; }
     for (let b = 0; b < BUTTERFLIES.length; b++) { const t = butterflySprites(b); s[`bf${b}_wing`] = t.wing; s[`bf${b}_body`] = t.body; }
     for (let d = 0; d < DRAGONFLIES.length; d++) { const t = dragonflySprites(d); s[`df${d}_wing`] = t.wing; s[`df${d}_body`] = t.body; }

@@ -308,7 +308,7 @@ internal sealed class InstallerForm : Form
         using RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKey);
         if (key == null) return;
         key.SetValue("DisplayName", AppName);
-        key.SetValue("DisplayVersion", "1.2.4");
+        key.SetValue("DisplayVersion", "1.2.5");
         key.SetValue("Publisher", "MoYu");
         key.SetValue("InstallLocation", destination);
         key.SetValue("DisplayIcon", Path.Combine(destination, "BichiPond.exe"));

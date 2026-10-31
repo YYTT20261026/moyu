@@ -26,6 +26,15 @@
 .profile-stats strong{font-weight:500;color:#4a5f4a}
 .profile-stats strong.muted{color:#a8b39e;font-weight:400;font-size:10px}
 .profile-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+/* The collection's heading sits above the grid, with the restore-all action in reach. */
+.collection-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.collection-head h3{margin:18px 0 8px}
+/* Make the one-click restore read as a button instead of a line of grey text. */
+.collection-head .edit-fish{flex:none;white-space:nowrap;padding:4px 9px;border:1px solid #ced6c4;border-radius:6px;color:#526e5e;font-size:10px}
+/* Toasts raised from inside a panel (the panel's own window, or the dialog in the pond) live in the
+   dialog; the pond's toast is hidden while the panel is open. */
+#panel-toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,10px);background:#526e5e;color:#fffcf0;padding:10px 18px;border-radius:9px;box-shadow:0 6px 22px #2038284d;font-size:11px;line-height:1.5;max-width:80vw;text-align:center;opacity:0;pointer-events:none;transition:.22s;z-index:20}
+#panel-toast.visible{opacity:1;transform:translate(-50%,0)}
 /* The collection's footer: this week's appetite and the way to the memorial. */
 .collection-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px}
 /* Two koi side by side. */
@@ -110,8 +119,11 @@
   .weather-card {top:calc(12px + var(--safe-top,0px));max-height:calc(100dvh - 24px - var(--safe-top,0px) - var(--safe-bottom,0px) - var(--dock-inset,0px))}
 }
 
-/* Folded: the corner card shrinks to its top row — the place name and the two buttons. */
-.weather-card.collapsed {width:auto;padding:9px 12px}
+/* Folded: the corner card shrinks to a single round icon; tapping it brings the card back. */
+.weather-card.collapsed {
+  width:46px;height:46px;padding:0;border-radius:50%;
+  display:grid;place-items:center;overflow:hidden;
+}
 .weather-card.collapsed #clock,
 .weather-card.collapsed #calendar,
 .weather-card.collapsed .season-label,
@@ -119,7 +131,10 @@
 .weather-card.collapsed .weather-foot,
 .weather-card.collapsed .dock,
 .weather-card.collapsed .pond-hint {display:none}
-.weather-card.collapsed .weather-top {min-height:0;gap:10px}
+.weather-card.collapsed .weather-top {min-height:0;margin:0;padding:0;border:0;width:auto;justify-content:center}
+.weather-card.collapsed .card-actions {width:auto;margin:0;gap:0;justify-content:center}
+.weather-card.collapsed .card-actions > .icon-button {display:none}
+.weather-card.collapsed .card-actions > #card-toggle {display:grid;width:38px;height:38px;margin:0}
 
 /* ?mode=panel: the small window above the desktop icons shows one panel and nothing else. */
 body.panel-only {background:#f6f4ea}
@@ -132,6 +147,6 @@ body.panel-only #panel {
 body.panel-only, body.panel-only * {scrollbar-width:none; -ms-overflow-style:none}
 body.panel-only ::-webkit-scrollbar {width:0; height:0; display:none}
 body.panel-only .panel-header {position:sticky; top:0; z-index:2; background:#f6f4ea}
-/* Sound and size sit beside the close button, but only in the panel's own window. */
+/* Size sits beside the close button, but only in the panel's own window; the close button is always there. */
 .panel-actions {display:flex; align-items:center; gap:2px}
-body:not(.panel-only) .panel-actions {display:none}
+body:not(.panel-only) .panel-actions > :not(.close-panel) {display:none}

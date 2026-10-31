@@ -14,7 +14,7 @@
     <RootNamespace>MoYu.Installer</RootNamespace>
     <ApplicationIcon>..\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.2.4</Version>
+    <Version>1.2.5</Version>
     <Product>摸鱼</Product>
     <AssemblyTitle>摸鱼安装程序</AssemblyTitle>
     <Description>摸鱼 Windows 安装程序</Description>

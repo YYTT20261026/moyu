@@ -4,7 +4,7 @@
 # Builds are taken from dist/ (run the scripts/build-*.sh first), renamed to plain ASCII for the release.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REPO="${REPO:-moli-xia/fishwallpaper}"
+REPO="${REPO:-YYTT20261026/moyu}"
 VERSION="${VERSION:-1.2.1}"
 GH="${GH:-$(command -v gh || true)}"
 [[ -n "$GH" ]] || { echo "GitHub CLI not found: https://cli.github.com (or set GH=/path/to/gh)"; exit 1; }

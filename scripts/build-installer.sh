@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOTNET="${DOTNET:-$ROOT/.build-tools/dotnet/dotnet}"
-VERSION="1.2.4"
+VERSION="1.2.5"
 INSTALLER_PROJECT="$ROOT/native/windows/installer"
 PAYLOAD="$INSTALLER_PROJECT/payload.zip"
 OUTPUT="$ROOT/dist/摸鱼-$VERSION.exe"

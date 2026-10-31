@@ -5,7 +5,7 @@
 <p align="center">把池塘放到桌面下面：锦鲤悠游、四季花开、雨打荷叶，轻轻一点就来抢食。<br>
 macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engine 里运行。</p>
 
-<p align="center"><a href="https://github.com/RJunYou/fishwallpaper/releases/latest"><b>⬇ 下载最新版本</b></a></p>
+<p align="center"><a href="https://github.com/YYTT20261026/moyu/releases/latest"><b>⬇ 下载最新版本</b></a></p>
 
 ![摸鱼秋季池塘](docs/screenshots/macos-current.jpg)
 
@@ -17,7 +17,7 @@ macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engin
 
 ## 下载
 
-在 [Releases](https://github.com/RJunYou/fishwallpaper/releases/latest) 下载对应平台的安装包：
+在 [Releases](https://github.com/YYTT20261026/moyu/releases/latest) 下载对应平台的安装包：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
@@ -163,14 +163,14 @@ gh auth login              # 首次使用时登录
 ./scripts/build-windows.sh
 ```
 
-生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.4）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
+生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.5）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
 
 安装器本身也是普通的 .NET Framework 4.8 程序（约 16MB），不做单文件自解压、不要求管理员权限，因此放在任何文件夹里双击都能直接运行，装到当前用户目录，快捷方式写入用户桌面与用户开始菜单，卸载信息写入 `HKCU`。安装时会把自身复制为安装目录下的 `uninstall.exe`，删除下载的安装包不影响卸载。
 
 使用：运行安装器，或解压便携版文件夹后双击 `BichiPond.exe`。池塘铺满每块屏幕的桌面背景，位于桌面图标之下（兼容 Windows 11 24H2 起改变的桌面层结构），不影响正常使用桌面。
 
 - 在桌面空白处轻点：锦鲤游过来抢食（程序只“旁听”鼠标，不拦截任何点击）。
-- 壁纸右上角常驻时钟天气卡片（自动避让顶部或侧边停靠的任务栏）：轻点“投喂”“声音”“沉浸”即时生效；轻点“我的锦鲤”“天气”“设置”会在桌面上浮出对应的面板（浮在桌面图标之上，可以直接操作），点面板外或按 Esc 收起；轻点卡片右上角的折叠按钮可把整张卡片收成一行，再点一次展开（状态会记住）；轻点“沉浸”可整张收起，再点“退出沉浸”回来。
+- 壁纸右上角常驻时钟天气卡片（自动避让顶部或侧边停靠的任务栏）：轻点“投喂”“声音”“沉浸”即时生效；轻点“我的锦鲤”“天气”“设置”会在桌面上浮出对应的面板（浮在桌面图标之上，可以直接操作），点面板外或按 Esc 收起；轻点卡片右上角的折叠按钮可把整张卡片缩成右上角一个圆形图标，再点一次展开（状态会记住）；轻点“沉浸”可整张收起，再点“退出沉浸”回来。
 - 通知区域的锦鲤图标（右键）：打开交互窗口（投喂、起名、天气、声音、设置）、切换四季、切换天气与月下观鱼、暂停壁纸动画、重载、开机时启动、退出；双击图标打开交互窗口。交互窗口里的改动即时同步到桌面壁纸。
 - 某块屏幕被最大化或全屏的窗口挡住、或锁屏时，这块屏幕的池塘停止绘制。
 - 资源管理器重启或显示器变化后自动重建壁纸；退出后桌面恢复为原来的系统壁纸。

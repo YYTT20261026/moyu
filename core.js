@@ -199,16 +199,18 @@
   }
   function createFish(index, random = Math.random) {
     const names = ['锦时','小满','丹朱','听雨','白露','金盏','青禾','望舒','知秋','浮玉','映月','点绛','云游','春水','琥珀','松墨','桃夭','长安','涟漪','拾光','朝露','小暑','如意','团团'];
-    const size = .62 + random() * .4;
+    const size = Math.min(KOI_SIZE.max, .62 + random() * .4);
     // baseSize is the fish as it was made; the body grows from there with everything it eats.
-    return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, temper: TEMPERS[index % TEMPERS.length], size, baseSize: size, born: Date.now(), seed: Math.floor(random()*100000), eaten: 0, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
+    return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, temper: TEMPERS[index % TEMPERS.length], size, baseSize: size, growthBase: 0, born: Date.now(), seed: Math.floor(random()*100000), eaten: 0, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
   }
   // Resident shoal is separate from the saved koi collection and its 60-fish limit.
   function createSilverCarpShoal(random = Math.random) {
-    return Array.from({ length: 4 }, (_, i) => ({
-      ...createFish(i, random), id: `silvercarp-${i}`, species: 'silvercarp', name: `青鲢${i + 1}`,
-      size: .88 + random() * .24, x: .36 + i * .075, y: .43 + random() * .12, angle: -.25, speed: 1.12
-    }));
+    return Array.from({ length: 4 }, (_, i) => {
+      const fish = createFish(i, random), size = Math.min(KOI_SIZE.max, .88 + random() * .24);
+      // The shoal has its own size; baseSize must match it so a pond-wide restore leaves them where
+      // they arrived instead of shrinking them to the koi's unused placeholder size.
+      return { ...fish, id: `silvercarp-${i}`, species: 'silvercarp', name: `青鲢${i + 1}`, size, baseSize: size, x: .36 + i * .075, y: .43 + random() * .12, angle: -.25, speed: 1.12 };
+    });
   }
   // Runtime-only swimming state; never persisted.
   function wake(f, random) {
@@ -314,8 +316,10 @@
     growFish(f, dt) {
       if (f.species === 'silvercarp') return;
       if (f.baseSize === undefined) f.baseSize = f.size;
-      const gain = Math.min(.42, Math.log1p(Math.max(0, f.eaten)) * .055);
-      const want = Math.min(1.5, f.baseSize * (1 + gain));
+      // growthBase is the meal count at which the body was last restored, so resetting a koi's build
+      // starts it growing again from that meal rather than instantly regrowing from its whole history.
+      const gain = Math.min(.42, Math.log1p(Math.max(0, f.eaten - (f.growthBase || 0))) * .055);
+      const want = Math.min(KOI_SIZE.max, f.baseSize * (1 + gain));
       if (want > f.size + .0005) f.size += (want - f.size) * Math.min(1, dt * .45);
     }
     // Thunder is on its way: the whole shoal sinks into deeper water and stays low.
@@ -358,7 +362,7 @@
         f.flee=(.45+(1-d/radius)*.7)*sc;
         f.fleeAngle=Math.atan2(dy,dx)+(this.random()-.5)*.9;
         f.beating=true;
-        f.v=Math.max(f.v,BODY.length*f.size*this.scale*.8*sc);
+        f.v=Math.max(f.v,BODY.length*f.size*this.scale*.6*sc);
         f.depthGoal=Math.min(.95,f.depth+.35*sc);
       }
     }
@@ -432,14 +436,18 @@
       const w=this.width,h=this.height,s=f.size*this.scale,L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
       let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite;
-      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
+      // A pellet lying closer to the bank than her mouth can reach is not food yet: it is still drifting
+      // out to open water. Lunging at it only pinned her against the shore frame after frame.
+      const mouthRoom=this.fishMargin(f)-BODY.nose*s-Math.max(6,7*s);
+      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten||(this.habitat&&!this.isWater(p.x,p.y,mouthRoom)))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       // Anything unreachable by the bank is dropped for a moment after she bumps into it.
       f.foodCooldown=Math.max(0,(f.foodCooldown||0)-dt);
       if(f.foodCooldown>0)food=null;
       let gx,gy,want,turnGain=silver?3.5:2,maxTurn=silver?2.4:1.3,sepW=2.4,boundW=3;
       f.flee=Math.max(0,f.flee-dt);
-      // Startle: a fast C-turn away, then a dash.
-      if(f.flee>0){gx=Math.cos(f.fleeAngle);gy=Math.sin(f.fleeAngle);want=2.6*L;turnGain=9;maxTurn=7;}
+      // Startle: a quick C-turn away, then a dash. The turn stays snappy; only the sprint is capped, so the
+      // pond reads calmer without the fish looking sluggish.
+      if(f.flee>0){gx=Math.cos(f.fleeAngle);gy=Math.sin(f.fleeAngle);want=1.9*L;turnGain=9;maxTurn=7;}
       else if(food){
         const dx=food.x-x,dy=food.y-y,d=Math.hypot(dx,dy)||1,err=Math.abs(wrap(Math.atan2(dy,dx)-f.angle));
         gx=dx/d;gy=dy/d;want=clamp(fd/L*1.3,.25,2.2)*L*Math.max(.12,Math.cos(Math.min(err,Math.PI/2))**2);
@@ -512,6 +520,9 @@
         const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY);
         x=oldX;y=oldY;f.v*=.45;
         f.angle=wrap(f.angle+clamp(wrap(Math.atan2(edge.ny,edge.nx)-f.angle),-dt*7,dt*7));f.goal=null;
+        // Blocked by the bank while chasing a pellet: let it go for a moment instead of pressing
+        // into the edge again on the very next frame, which read as a stutter.
+        if(food)f.foodCooldown=.5+this.random()*.4;
       }
       f.x=this.habitat?x/w:clamp(x/w,.03,.97);f.y=this.habitat?y/h:clamp(y/h,.035,.965);
       f.depth+=(f.depthGoal-f.depth)*Math.min(1,dt*(food?1.2:.35));
@@ -530,13 +541,14 @@
     if(!data||!Array.isArray(data.fish)||!data.fish.length) return null;
     const fish=data.fish.slice(0,60).filter(f=>f&&typeof f.name==='string').map((f,i)=>{
       const defaults=createFish(i,randomSeed(i+8));
-      return {...defaults,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,temper:TEMPERS.includes(f.temper)?f.temper:defaults.temper,size:clamp(Number(f.size)||.8,.45,1.5),baseSize:clamp(Number(f.baseSize)||Number(f.size)||defaults.size,.45,1.5),born:Number.isFinite(f.born)?f.born:null,lastMeal:Number.isFinite(f.lastMeal)?f.lastMeal:null,friend:typeof f.friend==='string'?f.friend:null,seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),marks:Array.isArray(f.marks)?f.marks.slice(0,400).filter(m=>m&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)&&/^#[0-9a-f]{6}$/i.test(m.color)).map(m=>({x:clamp(m.x,-32,32),y:clamp(m.y,-16,16),r:clamp(m.r,1,8),color:m.color})):[]};
+      return {...defaults,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,temper:TEMPERS.includes(f.temper)?f.temper:defaults.temper,size:clamp(Number(f.size)||.8,KOI_SIZE.min,KOI_SIZE.max),baseSize:clamp(Number(f.baseSize)||Number(f.size)||defaults.size,KOI_SIZE.min,KOI_SIZE.max),born:Number.isFinite(f.born)?f.born:null,lastMeal:Number.isFinite(f.lastMeal)?f.lastMeal:null,friend:typeof f.friend==='string'?f.friend:null,seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),growthBase:clamp(Math.floor(Number(f.growthBase)||0),0,9999999),marks:Array.isArray(f.marks)?f.marks.slice(0,400).filter(m=>m&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)&&/^#[0-9a-f]{6}$/i.test(m.color)).map(m=>({x:clamp(m.x,-32,32),y:clamp(m.y,-16,16),r:clamp(m.r,1,8),color:m.color})):[]};
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
   // The size range a koi can be given: the "我的锦鲤" panel's slider spans it, and it is what a saved
   // fish is clamped to, so a fish made in the panel never comes back a different size.
-  const KOI_SIZE = { min: .45, max: 1.5, initial: 1.5 };
+  // Sprite width is BODY.width = 96, so size 1 is 96px long at pond scale 1: the max is the 96px upper bound.
+  const KOI_SIZE = { min: .45, max: 1, initial: 1 };
   const api={PALETTES,SILVER_CARP,KOI_SIZE,TEMPERS,TEMPER_TRAITS,koiAge,fishPalette,createSilverCarpShoal,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
