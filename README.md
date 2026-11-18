@@ -138,7 +138,7 @@ gh auth login              # 首次使用时登录
 ./scripts/build-macos.sh
 ```
 
-生成 `dist/摸鱼.app` 和可拖拽安装的 `dist/摸鱼-<版本>.dmg`（当前 1.2.3），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
+生成 `dist/摸鱼.app` 和可拖拽安装的 `dist/摸鱼-<版本>.dmg`（当前 1.2.6），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
 
 双击打开后，池塘即铺满每块屏幕的桌面背景层——位于系统壁纸上、桌面图标下，不影响正常使用桌面；多显示器与空间切换均支持。
 
@@ -162,7 +162,7 @@ gh auth login              # 首次使用时登录
 ./scripts/build-windows.sh
 ```
 
-生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.5）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
+生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.6）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
 
 安装器本身也是普通的 .NET Framework 4.8 程序（约 16MB），不做单文件自解压、不要求管理员权限，因此放在任何文件夹里双击都能直接运行，装到当前用户目录，快捷方式写入用户桌面与用户开始菜单，卸载信息写入 `HKCU`。安装时会把自身复制为安装目录下的 `uninstall.exe`，删除下载的安装包不影响卸载。
 
@@ -185,7 +185,7 @@ gh auth login              # 首次使用时登录
 
 在 Windows 上手动打包时要注意：build-tools 里的 `aapt2.exe` 会把 APK 内的资源与 assets 条目写成 `assets\app.js` 这样的反斜杠路径，Android 按 `/` 解析，装上去会是一片空白。打包后需要把 ZIP 条目名里的 `\` 全部换成 `/`（保持 `resources.arsc` 不压缩），再做 `zipalign -f 4` 与 `apksigner sign`；`javac` 也要加 `-encoding UTF-8`。
 
-生成 `android/build/摸鱼.apk`，并复制到 `dist/摸鱼.apk`（约 38MB，版本 1.2.1；需 `~/android-build` 下的 JDK 17 与 Android 构建工具，以及带 Pillow 的 `python3`，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。手机版底图由 `scripts/prepare-mobile.py` 缩成 2560×1440 再打包：8K 的底图会生成 169MB 的内嵌脚本和每张 132MB 的位图，让手机的 WebView 内存溢出、壁纸一片空白（多数手机的纹理上限也只有 4096）。需要 Android 7.0（API 24）及以上。
+生成 `android/build/摸鱼.apk`，并复制到 `dist/摸鱼.apk`（约 38MB，版本 1.2.6；需 `~/android-build` 下的 JDK 17 与 Android 构建工具，以及带 Pillow 的 `python3`，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。手机版底图由 `scripts/prepare-mobile.py` 缩成 2560×1440 再打包：8K 的底图会生成 169MB 的内嵌脚本和每张 132MB 的位图，让手机的 WebView 内存溢出、壁纸一片空白（多数手机的纹理上限也只有 4096）。需要 Android 7.0（API 24）及以上。
 
 这是**手机桌面的动态壁纸**：池塘就在主屏幕（及系统允许时的锁屏）背景里游动，应用图标和小部件浮在水面上。
 
