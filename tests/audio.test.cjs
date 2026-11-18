@@ -62,7 +62,7 @@ test('换季清除上一季的等待时间，鸟鸣很快出现，调音量不�
   const { audio, api } = load(); audio.setup();
   audio.context.currentTime = 10;
   const heard = []; audio.bird = t => heard.push(t);
-  audio.events = { bird: 100, frog: 100 };
+  audio.events = { bird: 100 };
   audio.configure({ ...api.NATURE_DEFAULTS, season: 'autumn', weather: 'sunny' });
   assert.equal(Object.keys(audio.events).length, 0);
   audio.weatherEvents();
@@ -76,15 +76,13 @@ test('换季清除上一季的等待时间，鸟鸣很快出现，调音量不�
   assert.ok(audio.events.bird - first >= 20 && audio.events.bird - first <= 38);
 });
 
-test('夏夜切换后数秒内响起蛙声，随后持续按较短随机间隔出现', () => {
+test('夏夜不再安排蛙声，只保留虫鸣环境音', () => {
   const { audio, api } = load(); audio.setup(); audio.context.currentTime = 10;
   const heard = []; audio.frog = t => heard.push(t);
   audio.configure({ ...api.NATURE_DEFAULTS, season: 'summer', weather: 'sunny', night: true });
-  audio.weatherEvents(); const first = audio.events.frog;
-  assert.ok(first >= 13 && first <= 17);
-  audio.context.currentTime = first; audio.weatherEvents();
-  assert.deepEqual(heard, [first]);
-  assert.ok(audio.events.frog - first >= 10 && audio.events.frog - first <= 22);
+  audio.weatherEvents();
+  assert.equal(audio.events.frog, undefined);
+  assert.deepEqual(heard, []);
 });
 
 test('四季晴雨昼夜分别使用草木、淡蝉、虫鸣和雨声，冬季与雨雪不出现虫鸣', () => {
@@ -100,11 +98,11 @@ test('四季晴雨昼夜分别使用草木、淡蝉、虫鸣和雨声，冬季�
   assert.ok(layers('autumn','sunny',false).leaves > layers('winter','sunny',false).leaves * 3);
 });
 
-test('夏夜偶闻蛙声；秋冬、雪天不鸣蛙鸟，雨天仅有落水事件', () => {
+test('夜间无蛙声；秋冬、雪天不鸣鸟，雨天仅有落水事件', () => {
   const { audio } = load(); const heard = [];
   audio.context = { currentTime: 10, state: 'running' }; audio.opts.weatherSound = true;
   for (const name of ['bird','frog','crow','dove','cuckoo','raindrop']) audio[name] = () => heard.push(name);
-  for (const [season,weather,night,expected] of [['summer','sunny',true,'frog'],['spring','sunny',false,'bird'],['autumn','sunny',true,null],['winter','sunny',false,null],['winter','cloudy',true,null],['summer','snow',true,null],['summer','rain',true,'raindrop']]) {
+  for (const [season,weather,night,expected] of [['summer','sunny',true,null],['spring','sunny',false,'bird'],['autumn','sunny',true,null],['winter','sunny',false,null],['winter','cloudy',true,null],['summer','snow',true,null],['summer','rain',true,'raindrop']]) {
     heard.length = 0; audio.scene = { season, weather, night, rain: .5 }; audio.events = { bird: 10.1, frog: 10.1, drop: 10.1 };
     audio.weatherEvents();
     if (expected) assert.ok(heard.length && heard.every(x => x === expected)); else assert.equal(heard.length, 0);

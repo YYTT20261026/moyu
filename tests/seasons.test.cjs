@@ -15,19 +15,33 @@ function layout(season,w,h,turn=true){
 }
 const settings={weather:'sunny',night:false,turtles:false,butterflies:false,crabs:false,rainAmount:.5,snowAmount:.5};
 
-test('四季底图均内嵌有效的 JPEG，静态构建包含缩略图，离线无需跨域加载纹理',()=>{
-  const context={window:{}};
+test('8K 底图只在 file:// 页面内嵌，http(s) 直接加载 PNG，静态构建包含缩略图',()=>{
+  // 底图单独放在 pond-bed.js：只有 file://（双击打开、Android、macOS、Wallpaper Engine）才需要这份
+  // base64，http(s) 页面（Windows 壁纸的虚拟域名、开发服务器、网站）直接读 assets 里的 PNG。
+  const bed={window:{}},context={window:{}};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/pond-bed.js'),'utf8'),bed);
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/pond-data.js'),'utf8'),context);
+  assert.equal(bed.window.POND_IMAGES && Object.keys(bed.window.POND_IMAGES).length,4);
+  assert.ok(!('POND_IMAGES' in context.window),'启动即解析的 pond-data.js 不再夹杂底图');
+  assert.ok(fs.statSync(require.resolve('../assets/pond-data.js')).size<4e6,'pond-data.js 只保留荷花与花叶');
+  const index=fs.readFileSync(require.resolve('../index.html'),'utf8');
+  assert.ok(index.includes("location.protocol==='file:'")&&index.includes('assets/pond-bed.js'),'内嵌底图按协议按需加载');
   for(const [season,info] of Object.entries(core.SEASONS)){
-    const data=Buffer.from(context.window.POND_IMAGES[season].split(',')[1],'base64');
-    assert.equal(data.readUInt16BE(0),0xffd8);
+    const data=Buffer.from(bed.window.POND_IMAGES[season].split(',')[1],'base64');
+    assert.equal(data.subarray(1,4).toString(),'PNG');
+    // 岸线、石头、荷叶与鱼标注在 POND_MAPS 的 2560×1440 设计尺度上；底图可以是 8K，
+    // 只要宽高比与设计尺度一致，渲染器就会把同一份标注映射到同一处水面。
+    const map=core.POND_MAPS[season],w=data.readUInt32BE(16),h=data.readUInt32BE(20);
+    assert.equal(w*map.height,h*map.width,`${season} 运行底图宽高比应与标注尺度一致`);
+    assert.ok(w>=map.width&&h>=map.height,`${season} 运行底图不应低于标注尺度`);
     assert.deepEqual(data,fs.readFileSync(require.resolve(`../${info.image}`)));
     assert.deepEqual(data,fs.readFileSync(require.resolve(`../dist/${info.image}`)));
     const thumbnail=fs.readFileSync(require.resolve(`../${info.thumbnail}`));
     assert.ok(thumbnail.length<data.length*.05,'季节预览使用小图，避免再次解码完整底图');
     assert.deepEqual(thumbnail,fs.readFileSync(require.resolve(`../dist/${info.thumbnail}`)));
   }
-  assert.equal(context.window.POND_IMAGE,context.window.POND_IMAGES.spring);
+  assert.equal(bed.window.POND_IMAGE,bed.window.POND_IMAGES.spring);
+  assert.deepEqual(fs.readFileSync(require.resolve('../dist/assets/pond-bed.js')),fs.readFileSync(require.resolve('../assets/pond-bed.js')),'双击 dist/index.html 仍可离线加载 8K 底图');
   const lotus=Buffer.from(context.window.POND_LOTUS_IMAGE.split(',')[1],'base64');
   assert.equal(lotus.subarray(1,4).toString(),'PNG');
   assert.deepEqual(lotus,fs.readFileSync(require.resolve('../assets/lotus-original.png')));
@@ -38,6 +52,17 @@ test('四季底图均内嵌有效的 JPEG，静态构建包含缩略图，离线
   assert.deepEqual(driftImage,fs.readFileSync(require.resolve('../dist/assets/drifting-flora.png')));
   assert.equal(JSON.stringify(context.window.POND_DRIFTERS),JSON.stringify(drifters));
   assert.deepEqual(fs.readFileSync(require.resolve('../assets/drifting-flora.json')),fs.readFileSync(require.resolve('../dist/assets/drifting-flora.json')));
+});
+
+test('Android 打包使用手机尺寸底图，不把 8K 底图与 169MB 内嵌脚本塞进 APK',()=>{
+  const script=fs.readFileSync(require.resolve('../scripts/build-android.sh'),'utf8');
+  assert.ok(script.includes('scripts/prepare-mobile.py'),'APK 应先按手机尺寸生成底图');
+  assert.ok(script.includes('build/mobile/pond-bed.js'),'内嵌底图来自手机版本');
+  assert.ok(script.includes('build/mobile/stills/pond*.png'),'静态兜底画面与 CSS 背景用手机尺寸 PNG');
+  assert.ok(!script.includes('$ROOT/assets/pond-bed.js'),'不能打包 169MB 的 8K 内嵌脚本');
+  assert.ok(!/assets\/pond\*runtime\.png/.test(script),'不能把 8K PNG 打进 APK');
+  const mobile=fs.readFileSync(require.resolve('../scripts/prepare-mobile.py'),'utf8');
+  assert.ok(/SIZE\s*=\s*\(2560,\s*1440\)/.test(mobile),'手机底图保持 2560×1440 标注尺度');
 });
 
 for(const [w,h,turn] of [[1280,720,true],[390,844,true],[390,844,false]])test(`${w}×${h} ${turn?'WebGL':'Canvas'}：四季散落花叶持续漂移旋转，受到水波推动也不越过岸边和石头`,()=>{
@@ -96,37 +121,31 @@ test('各季节独立标注石头，夏秋冬旧春季石头位置成为可游�
 });
 
 test('四季上方露出水面的石头不属于水域，周围仍是可游水面',()=>{
-  const points={
-    spring:[[1010,190],[1025,185],[1040,185]],
-    summer:[[1420,305],[1480,350],[1350,350]],
-    autumn:[[1400,410],[1470,450],[1340,400]],
-    winter:[[1425,310],[1480,340],[1355,330]]
-  };
 for(const season of Object.keys(core.SEASONS)){
     const {habitat}=layout(season,2560,1440);
-    for(const [x,y] of points[season]){
-      assert.equal(habitat.contains(x,y),false,`${season} 上方石头 (${x},${y})`);
+    for(const rock of core.POND_MAPS[season].rocks){
+      const [u,v]=rock.reduce((s,p)=>[s[0]+p[0]/rock.length,s[1]+p[1]/rock.length],[0,0]);
+      assert.equal(habitat.contains(u*2560,v*1440),false,`${season} 标注石头中心 (${u*2560},${v*1440})`);
     }
     assert.equal(habitat.contains(1200,760,20),true,`${season} 石头下方应保留水面`);
-    assert.equal(core.POND_MAPS[season].rocks.length,2,`${season} 应包含主石头和上方石头`);
+    assert.ok(core.POND_MAPS[season].rocks.length>=1,`${season} 应标注露出水面的石头`);
   }
   const {habitat}=layout('spring',2560,1440);
   const water=(x,y)=>habitat.sample(x/2048*2560,y/1152*1440);
-  for(const [u,v] of core.POND_MAPS.spring.rocks[1].slice(15,20)){
+  for(const [u,v] of core.POND_MAPS.spring.rocks[0].slice(4,9)){
     const x=u*2560,y=v*1440;
     assert.ok(Math.abs(habitat.sample(x,y).distance)<1e-6,`春图石头黄边 (${x},${y}) 应成为水位线`);
   }
-  assert.ok(water(1040,170).distance<0,'苔藓石内部应属于障碍');
-  assert.ok(water(1160,240).distance>0,'苔藓石右侧花下应属于可游水面');
-  assert.ok(water(1180,280).distance>0,'苔藓石右下方花下应属于可游水面');
-  assert.ok(water(1120,300).distance>0,'花下右侧应属于可游水面');
-  assert.ok(water(1090,370).distance>0,'苔藓石下方应保留可游水面');
+  const rock=core.POND_MAPS.spring.rocks[0];
+  const [ru,rv]=rock.reduce((s,p)=>[s[0]+p[0]/rock.length,s[1]+p[1]/rock.length],[0,0]);
+  assert.ok(habitat.sample(ru*2560,rv*1440).distance<0,'标注石头内部应属于障碍');
+  assert.ok(habitat.contains(ru*2560-320,rv*1440-60,20),'标注石头旁仍保留可游水面');
 });
 
 test('切换季节保留水中的鱼食，清除新石头位置的鱼食并立即移回鱼群',()=>{
   const sim=new core.PondSimulation([core.createFish(0,core.randomSeed(17))],2560,1440);
   sim.setHabitat(layout('spring',2560,1440).habitat);
-  const rock=[1580,704],open=[1280,720];
+  const rock=[1975,880],open=[1280,720];
   assert.equal(sim.isWater(...rock,4),true);
   assert.equal(sim.feed(...rock,1),true);assert.equal(sim.feed(...open,1),true);
   sim.fish[0].x=rock[0]/2560;sim.fish[0].y=rock[1]/1440;
@@ -160,7 +179,7 @@ for(const [w,h,turn] of [[1280,720,true],[390,844,true],[390,844,false]]){
   test(`${w}×${h} ${turn?'WebGL':'Canvas'}：带鱼群与鱼食切换四季，鱼身保持在水域并能吃到石边食物`,()=>{
     const rnd=core.randomSeed(174),fish=Array.from({length:24},(_,i)=>core.createFish(i,rnd));
     fish[0].size=1.5;
-    const sim=new core.PondSimulation(fish,w,h,rnd,core.createSilverCarpShoal(rnd));
+    const sim=new core.PondSimulation(fish,w,h,rnd);
     sim.scale=core.clamp(Math.min(w,h)/720,.66,1.25);
     const R={imageToScreen:(x,y)=>[x,y],drop(){}};
     const scene=new PondScene(R,sim,rnd);
@@ -169,7 +188,7 @@ for(const [w,h,turn] of [[1280,720,true],[390,844,true],[390,844,false]]){
       scene.setSeason(season);scene.layout(w,h);scene.update(0,settings);
       for(const p of scene.lotusPlants){
         assert.ok(sim.isWater(p.x,p.y,p.r),`${season} 荷花植物的完整轮廓应落在水中`);
-        assert.ok(p.x<w*.45&&p.y>h*.55,`${season} 荷花应留在可见池塘的左下方`);
+        assert.ok(p.x>0&&p.x<w&&p.y>0&&p.y<h,`${season} 荷花应留在可见画面内`);
       }
       for(const c of scene.crabs)assert.equal(c.homes,scene.crabHomeDefs);
       const rock=core.POND_MAPS[season].rocks[0];
@@ -180,7 +199,7 @@ for(const [w,h,turn] of [[1280,720,true],[390,844,true],[390,844,false]]){
       assert.equal(sim.feed(...feed),true);
       for(let frame=0;frame<1490&&sim.food.length;frame++){
         sim.step(1/60);
-        if(frame%30===0)for(const f of sim.allFish){
+        if(frame%30===0)for(const f of sim.fish){
           const pose=core.fishPose(f,f.size*sim.scale);
           for(let i=0;i<pose.length;i+=4)assert.ok(sim.isWater(pose[i],pose[i+1],core.BODY.half*f.size*sim.scale),`${season} 鱼身越界`);
         }

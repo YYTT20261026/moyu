@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {PondSimulation,createFish,randomSeed,weatherFromCode,sanitizeSave,fishPose,BODY,PALETTES,createSilverCarpShoal}=require('../core.js');
+const {PondSimulation,createFish,randomSeed,weatherFromCode,sanitizeSave,fishPose,BODY,PALETTES}=require('../core.js');
 test('锦鲤会追逐并吃掉鱼食，每颗只记一次',()=>{
   const random=randomSeed(2),fish=createFish(0,random);fish.x=.5;fish.y=.5;fish.angle=0;
   const pond=new PondSimulation([fish],1000,700,random);pond.feed(610,350,8);
@@ -75,32 +75,4 @@ test('纯红花色能随旧存档往返，原有花色编号不变',()=>{
   const saved=sanitizeSave(JSON.parse(JSON.stringify({fish:[{name:'朱砂',palette:red},{name:'墨墨',palette:5}]})));
   assert.equal(saved.fish[0].palette,red);
   assert.equal(PALETTES[saved.fish[1].palette].kind,'karasu');
-});
-test('青鲢独立于锦鲤名额，混游稳定且不争抢投喂颗粒',()=>{
-  const random=randomSeed(38),koi=createFish(0,random),shoal=createSilverCarpShoal(random);
-  const pond=new PondSimulation([koi],1000,700,random,shoal);
-  assert.equal(pond.allFish.length,5);assert.equal(pond.fish.length,1);assert.equal(shoal.length,4);
-  pond.feed(600,350,9);
-  for(let i=0;i<3600;i++)pond.step(1/60);
-  assert.equal(koi.eaten,9);
-  for(const f of shoal){assert.equal(f.eaten,0);assert.ok(fishPose(f,f.size).every(Number.isFinite));assert.ok(f.x>=.03&&f.x<=.97&&f.y>=.035&&f.y<=.965);}
-  pond.scare(shoal[0].x*1000,shoal[0].y*700);assert.ok(shoal[0].flee>0);
-});
-
-test('青鲢转向响应比锦鲤灵活，急转后脊柱仍连续稳定',()=>{
-  function turn(species){
-    const f={...createFish(0,()=>.5),species,x:.5,y:.5,size:1,speed:1,angle:0};
-    const pond=new PondSimulation([f],4000,3000,()=>1);
-    pond.step(0);f.goal={x:.5,y:.85};f.goalTime=100;f.depthGoal=f.depth;
-    for(let i=0;i<30;i++)pond.step(1/60);
-    return {f,pond};
-  }
-  const koi=turn(undefined),carp=turn('silvercarp');
-  assert.ok(carp.f.angle > koi.f.angle * 1.4, '相同转弯目标下青鲢应更快改变航向');
-  const {f,pond}=carp;pond.scare(f.x*4000+30,f.y*3000);
-  for(let t=0;t<600;t++){
-    pond.step(1/60);const pose=fishPose(f,1);assert.ok(pose.every(Number.isFinite));
-    let length=0;for(let i=1;i<=BODY.segments;i++)length+=Math.hypot(pose[i*4]-pose[i*4-4],pose[i*4+1]-pose[i*4-3]);
-    assert.ok(Math.abs(length/BODY.length-1)<.15);
-  }
 });

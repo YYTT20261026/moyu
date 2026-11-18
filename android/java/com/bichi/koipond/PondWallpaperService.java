@@ -47,6 +47,9 @@ import java.io.InputStream;
 public class PondWallpaperService extends WallpaperService {
     static final String TAG = "BichiPond";
 
+    /** The still painting, also the CSS backdrop of the 2D fallback (a 2560×1440 image in the APK). */
+    static final String STILL = "assets/pond-runtime.png";
+
     @Override
     public Engine onCreateEngine() { return new PondEngine(); }
 
@@ -104,7 +107,7 @@ public class PondWallpaperService extends WallpaperService {
                     presentation.setContentView(frame);
                     presentation.show();
                     attachWeb();
-                    setStatus(PondWallpaperService.this, (bridge ? "starting (frame bridge) " : "starting (direct) ") + w + "×" + h + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL);
+                    setStatus(PondWallpaperService.this, (bridge ? "starting (frame bridge) " : "starting (direct) ") + w + "×" + h + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · " + PondWeb.assetSummary(PondWallpaperService.this));
                     // If the pond has not produced a single frame after a while, show the painting rather than black.
                     main.postDelayed(() -> { if (bridge && !firstFrame && display != null) showStill("no frames from the pond window after 10 s"); }, 10_000);
                 } else if (resized) {
@@ -152,7 +155,7 @@ public class PondWallpaperService extends WallpaperService {
                 frames++;
                 if (!firstFrame) {
                     firstFrame = true; stillShown = false;
-                    setStatus(PondWallpaperService.this, "running · " + width + "×" + height + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL);
+                    setStatus(PondWallpaperService.this, "running · " + width + "×" + height + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · " + PondWeb.assetSummary(PondWallpaperService.this));
                 }
             } catch (RuntimeException e) {
                 Log.w(TAG, "frame copy failed", e);
@@ -168,11 +171,25 @@ public class PondWallpaperService extends WallpaperService {
             drawStill();
         }
 
+        // The APK ships a phone-sized still, but decode it downsampled anyway: were a full 8K bed bundled
+        // instead, the bitmap alone would ask for ~132 MB and the wallpaper would never appear.
+        private Bitmap decodeStill() {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream in = getAssets().open(STILL)) { BitmapFactory.decodeStream(in, null, bounds); }
+            catch (Exception e) { return null; }
+            int sample = 1, longest = Math.max(bounds.outWidth, bounds.outHeight);
+            while (longest / (sample * 2) >= 2048) sample *= 2;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            try (InputStream in = getAssets().open(STILL)) { return BitmapFactory.decodeStream(in, null, options); }
+            catch (Exception e) { return null; }
+        }
+
         private void drawStill() {
             SurfaceHolder holder = target;
             if (holder == null || width == 0) return;
-            Bitmap pond;
-            try (InputStream in = getAssets().open("assets/pond.jpg")) { pond = BitmapFactory.decodeStream(in); } catch (Exception e) { return; }
+            Bitmap pond = decodeStill();
             if (pond == null) return;
             // Fitted like the live pond: cover the screen, turned a quarter on a portrait screen so the lotus shows.
             boolean turn = height > width * 1.15f;

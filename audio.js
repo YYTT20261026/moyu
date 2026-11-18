@@ -17,10 +17,10 @@
     settings.waterType = 'lapping'; settings.music = 'off'; settings.musicVol = 0;
   }
   const SEASON_SOUNDS = {
-    spring: { wind: .40, insects: .20, birds: [9, 18], frogs: [28, 50] },
-    summer: { wind: .30, insects: .55, birds: [14, 26], frogs: [10, 22] },
-    autumn: { wind: .68, insects: .12, birds: [20, 38], frogs: null },
-    winter: { wind: .18, insects: 0, birds: null, frogs: null }
+    spring: { wind: .40, insects: .20, birds: [9, 18] },
+    summer: { wind: .30, insects: .55, birds: [14, 26] },
+    autumn: { wind: .68, insects: .12, birds: [20, 38] },
+    winter: { wind: .18, insects: 0, birds: null }
   };
 
   // ---------- Offline synthesis ----------
@@ -199,7 +199,7 @@
       if (p) { p.pan.value = pan; src.connect(g).connect(p).connect(bus); } else src.connect(g).connect(bus);
       src.start(when); return src;
     }
-    // Live sounds of the weather: raindrops falling into the pond, birds by day, frogs by night.
+    // Live sounds of the weather: raindrops falling into the pond and birds by day.
     // Thunder is not scheduled here: it follows the lightning the pond draws (see thunderAfter).
     weatherEvents() {
       const ctx = this.context; if (!ctx || ctx.state !== 'running' || !this.opts.weatherSound) return;
@@ -209,7 +209,7 @@
       } else if (weather === 'snow' || season === 'winter') {
         return;
       } else if (night) {
-        if (profile.frogs && due('frog', () => rand(3, 7))) { this.frog(e.frog); e.frog += rand(...profile.frogs); }
+        return; // 夜间只保留虫鸣环境音，不再安排蛙声。
       } else {
         const factor = weather === 'cloudy' ? 1.4 : 1;
         if (profile.birds && due('bird', () => rand(2, 5))) { this.bird(e.bird); e.bird += rand(...profile.birds) * factor; }
@@ -240,16 +240,6 @@
       if (kind === 0) { const f = rand(3200, 4300); let s = t; for (let k = 3 + Math.floor(rand(0, 4)); k > 0; k--) { this.tone(s, f * rand(.92, 1.06), f * rand(1.2, 1.38), rand(.05, .08), gain, pan, this.wildlifeBus); s += rand(.09, .15); } }
       else if (kind === 1) { const f = rand(1700, 2300); this.tone(t, f, f * 1.12, .22, gain * 1.2, pan, this.wildlifeBus); this.tone(t + .29, f * 1.22, f * .95, .3, gain * 1.2, pan, this.wildlifeBus); }
       else { const f = rand(4300, 5300); for (let k = 0; k < 10; k++) this.tone(t + k * .045, f, f * .84, .035, gain * .8, pan, this.wildlifeBus); }
-    }
-    // A frog: a burst of buzzy pulses through a throat-like resonance, sometimes answered twice.
-    frog(t) {
-      const ctx = this.context, f = rand(170, 300), rate = rand(18, 28), pan = rand(-.85, .85), gain = rand(.045, .075);
-      for (let rep = 0, s = t; rep < 1 + Math.floor(rand(0, 3)); rep++, s += rand(.5, .9)) {
-        const o = ctx.createOscillator(), bp = ctx.createBiquadFilter(), g = ctx.createGain(), p = ctx.createStereoPanner(), pulses = 5 + Math.floor(rand(0, 6));
-        o.type = 'sawtooth'; o.frequency.value = f; bp.type = 'bandpass'; bp.frequency.value = f * 3.2; bp.Q.value = 3; p.pan.value = pan; g.gain.value = 0;
-        for (let k = 0; k < pulses; k++) { const a = s + k / rate; g.gain.setValueAtTime(0, a); g.gain.linearRampToValueAtTime(gain, a + .006); g.gain.linearRampToValueAtTime(0, a + .75 / rate); }
-        o.connect(bp).connect(g).connect(p).connect(this.wildlifeBus); o.start(s); o.stop(s + pulses / rate + .05);
-      }
     }
     // Switch the sound to a known state rather than flipping it, so pages can follow one shared setting.
     async setActive(on) {

@@ -15,8 +15,10 @@
   <script>/* Same for the recordings: a panel has no sound of its own. */
     if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/audio-data.js" defer><\/script>');</script>
   <script src="audio.js" defer></script>
-  <script>/* The panel window shows a panel only, so its 6 MB water map is skipped: it makes the first tap open sooner. */
-    if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-data.js" defer><\/script>');</script>
+  <script>/* The panel window shows a panel only, so its artwork is skipped: it makes the first tap open sooner. */
+    if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-data.js" defer><\/script>');
+    /* file:// pages cannot upload an <img> to WebGL, so they take the inlined 8K beds; http(s) loads the PNGs. */
+    if(location.protocol==='file:'&&!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-bed.js" defer><\/script>');</script>
   <script src="app.js" defer></script>
 </head>
 <body>

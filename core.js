@@ -9,8 +9,7 @@
     { name: '墨鲤', base: '#2a3130', spot: '#161c1d', fin: '#444c49', kind: 'karasu' },
     { name: '纯红', base: '#cb3025', spot: '#cb3025', fin: '#c9382c', kind: 'benigoi' }
   ];
-  const SILVER_CARP = { name: '青鲢', base: '#184140', spot: '#184140', fin: '#a9c4bd', kind: 'silvercarp' };
-  const fishPalette = f => f.species === 'silvercarp' ? SILVER_CARP : PALETTES[f.palette] || PALETTES[0];
+  const fishPalette = f => PALETTES[f.palette] || PALETTES[0];
   // Fish body in local units: nose at +34, tail tip at -58; sprites span x -60..36, y -14..14.
   const BODY = { nose: 34, tail: -58, length: 92, segments: 16, rigid: 5, left: -60, width: 96, half: 14 };
   const TAU = Math.PI * 2;
@@ -103,10 +102,10 @@
        [1688,880],[1632,852],[1608,796]]])
   };
   const SEASONS = {
-    spring:{name:'春',title:'春暖花开',image:'assets/pond.jpg',thumbnail:'assets/pond-spring-thumb.jpg',weather:'sunny'},
-    summer:{name:'夏',title:'绿荫盛夏',image:'assets/pond-summer.jpg',thumbnail:'assets/pond-summer-thumb.jpg',weather:'sunny'},
-    autumn:{name:'秋',title:'枫染清池',image:'assets/pond-autumn.jpg',thumbnail:'assets/pond-autumn-thumb.jpg',weather:'sunny'},
-    winter:{name:'冬',title:'白雪映池',image:'assets/pond-winter.jpg',thumbnail:'assets/pond-winter-thumb.jpg',weather:'snow'}
+    spring:{name:'春',title:'春暖花开',image:'assets/pond-runtime.png',thumbnail:'assets/pond-spring-thumb.jpg',weather:'sunny'},
+    summer:{name:'夏',title:'绿荫盛夏',image:'assets/pond-summer-runtime.png',thumbnail:'assets/pond-summer-thumb.jpg',weather:'sunny'},
+    autumn:{name:'秋',title:'枫染清池',image:'assets/pond-autumn-runtime.png',thumbnail:'assets/pond-autumn-thumb.jpg',weather:'sunny'},
+    winter:{name:'冬',title:'白雪映池',image:'assets/pond-winter-runtime.png',thumbnail:'assets/pond-winter-thumb.jpg',weather:'snow'}
   };
   function polygonSample(points,x,y) {
     let inside=false,best=Infinity,qx=0,qy=0,ex=0,ey=0;
@@ -203,20 +202,11 @@
     // baseSize is the fish as it was made; the body grows from there with everything it eats.
     return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, temper: TEMPERS[index % TEMPERS.length], size, baseSize: size, growthBase: 0, born: Date.now(), seed: Math.floor(random()*100000), eaten: 0, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
   }
-  // Resident shoal is separate from the saved koi collection and its 60-fish limit.
-  function createSilverCarpShoal(random = Math.random) {
-    return Array.from({ length: 4 }, (_, i) => {
-      const fish = createFish(i, random), size = Math.min(KOI_SIZE.max, .88 + random() * .24);
-      // The shoal has its own size; baseSize must match it so a pond-wide restore leaves them where
-      // they arrived instead of shrinking them to the koi's unused placeholder size.
-      return { ...fish, id: `silvercarp-${i}`, species: 'silvercarp', name: `青鲢${i + 1}`, size, baseSize: size, x: .36 + i * .075, y: .43 + random() * .12, angle: -.25, speed: 1.12 };
-    });
-  }
   // Runtime-only swimming state; never persisted.
   function wake(f, random) {
     if (f.v !== undefined) return;
     f.v = 0; f.turn = 0; f.thrust = 0; f.amp = .25; f.beating = false; f.idle = 0;
-    f.depth = f.species === 'silvercarp' ? .23 + random() * .2 : .25 + random() * .55; f.depthGoal = f.depth;
+    f.depth = .25 + random() * .55; f.depthGoal = f.depth;
     f.goal = null; f.goalTime = 0; f.rest = 0; f.flee = 0; f.fleeAngle = 0;
     f.cruise = (.3 + random() * .22) * clamp(Number(f.speed) || 1, .5, 1.5);
     // Old koi keep to a gentler pace.
@@ -232,7 +222,7 @@
   }
   // Head-led chain: the front of the body is rigid, the rest follows the path the head swam.
   function updateSpine(f, s, w, h) {
-    const rigid = f.species === 'silvercarp' ? 4 : BODY.rigid;
+    const rigid = BODY.rigid;
     const n = BODY.segments, seg = BODY.length / n * s, x = f.x * w, y = f.y * h, c = Math.cos(f.angle), si = Math.sin(f.angle);
     const nx = x + c * BODY.nose * s, ny = y + si * BODY.nose * s;
     let p = f.spine;
@@ -244,21 +234,20 @@
     for (let i = 0; i <= rigid; i++) { p[i*2] = nx - c * seg * i; p[i*2+1] = ny - si * seg * i; }
     let prev = f.angle;
     for (let i = rigid + 1; i <= n; i++) {
-      const px = p[(i-1)*2], py = p[(i-1)*2+1], lim = f.species === 'silvercarp' ? .13 + .22 * i / n : .1 + .16 * i / n;
+      const px = p[(i-1)*2], py = p[(i-1)*2+1], lim = .1 + .16 * i / n;
       const a = prev + clamp(wrap(Math.atan2(py - p[i*2+1], px - p[i*2]) - prev), -lim, lim);
       p[i*2] = px - Math.cos(a) * seg; p[i*2+1] = py - Math.sin(a) * seg; prev = a;
     }
   }
   // Spine points with the travelling tail-beat wave; out holds x, y, normalX, normalY per point.
   function fishPose(f, s, out = new Float32Array((BODY.segments + 1) * 4)) {
-    const silver = f.species === 'silvercarp';
-    const n = BODY.segments, p = f.spine, amp = (f.amp || 0) * (silver ? 4.8 : 6.4) * s;
+    const n = BODY.segments, p = f.spine, amp = (f.amp || 0) * 6.4 * s;
     // The spine already follows the path the head swam (see updateSpine), so a turn bends the body on its
     // own; only the travelling tail-beat is added here.
     for (let i = 0; i <= n; i++) {
       const a = Math.max(0, i - 1), b = Math.min(n, i + 1);
       let tx = p[a*2] - p[b*2], ty = p[a*2+1] - p[b*2+1]; const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
-      const u = i / n, env = .05 + .95 * Math.pow(Math.max(0, (u - .2) / .8), 1.5), lat = amp * env * Math.sin(f.phase - u * (silver ? 6.4 : 5.4));
+      const u = i / n, env = .05 + .95 * Math.pow(Math.max(0, (u - .2) / .8), 1.5), lat = amp * env * Math.sin(f.phase - u * 5.4);
       out[i*4] = p[i*2] - ty * lat; out[i*4+1] = p[i*2+1] + tx * lat;
     }
     for (let i = 0; i <= n; i++) {
@@ -269,15 +258,13 @@
     return out;
   }
   class PondSimulation {
-    constructor(fish,width,height,random=Math.random,residents=[],residentsOn=true) { this.fish=fish; this.residents=residents; this.residentsOn=residentsOn; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; this.habitat=null;
+    constructor(fish,width,height,random=Math.random) { this.fish=fish; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; this.habitat=null;
       // Who swims beside whom: a running tally of nearby pairs, used by the collection's profiles.
       this.bonds=new Map(); this.tick=0; }
-    get allFish() { return this.residentsOn?this.fish.concat(this.residents):this.fish; }
     isWater(x,y,margin=0) { return this.habitat?this.habitat.contains(x,y,margin):x>=margin&&x<=this.width-margin&&y>=margin&&y<=this.height-margin; }
     fishMargin(f) { return (Math.abs(BODY.tail)+BODY.half+7)*f.size*this.scale+5; }
     feedingMargin() {
-      // Leave room for at least one koi to line up its mouth and turn around a
-      // pellet. Residents do not eat, so their size must not set this margin.
+      // Leave room for at least one koi to line up its mouth and turn around a pellet.
       let margin=Infinity;
       for(const f of this.fish){const s=f.size*this.scale; margin=Math.min(margin,this.fishMargin(f)+BODY.nose*s*.4+8);}
       return Number.isFinite(margin)?Math.max(4,margin):4;
@@ -314,7 +301,6 @@
     // Everything a koi eats goes into its body: it grows slowly toward a larger self and stops at the
     // biggest size the panel's slider allows.
     growFish(f, dt) {
-      if (f.species === 'silvercarp') return;
       if (f.baseSize === undefined) f.baseSize = f.size;
       // growthBase is the meal count at which the body was last restored, so resetting a koi's build
       // starts it growing again from that meal rather than instantly regrowing from its whole history.
@@ -322,20 +308,20 @@
       const want = Math.min(KOI_SIZE.max, f.baseSize * (1 + gain));
       if (want > f.size + .0005) f.size += (want - f.size) * Math.min(1, dt * .45);
     }
-    // Thunder is on its way: the whole shoal sinks into deeper water and stays low.
+    // Thunder is on its way: every fish sinks into deeper water and stays low.
     dive() {
-      for (const f of this.allFish) {
+      for (const f of this.fish) {
         wake(f, this.random);
         f.depthGoal = .86 + this.random() * .12;
         f.v = Math.max(f.v, BODY.length * f.size * this.scale * .3);
         f.rest = 0;
       }
     }
-    // Lotus leaves the shoal can shelter under while it rains (screen coordinates, from the scene).
+    // Lotus leaves the fish can shelter under while it rains (screen coordinates, from the scene).
     setShelters(points) { this.shelters = points && points.length ? points : null; }
     setHabitat(habitat) {
       this.habitat=habitat;
-      for(const f of this.allFish){wake(f,this.random);this.confineFish(f);f.goal=null;f.spine=null;}
+      for(const f of this.fish){wake(f,this.random);this.confineFish(f);f.goal=null;f.spine=null;}
       this.food=this.food.filter(p=>this.isWater(p.x,p.y,4));
       for(const p of this.food)p.feedGoal=null;
     }
@@ -352,7 +338,7 @@
     }
     // A tap without food startles nearby fish into a short dash away from it.
     scare(x,y,radius=170,strength=1) {
-      for(const f of this.allFish){
+      for(const f of this.fish){
         wake(f,this.random);
         const dx=f.x*this.width-x,dy=f.y*this.height-y,d=Math.hypot(dx,dy);
         if(d>=radius)continue;
@@ -368,7 +354,7 @@
     }
     pickGoal(f) {
       const r=this.random,w=this.width,h=this.height,m=.15,span=Math.min(w,h);let best=null,score=-Infinity;
-      // In the rain the shoal gathers under the lotus leaves instead of wandering off somewhere random.
+      // In the rain the fish gather under the lotus leaves instead of wandering off somewhere random.
       if(this.shelters&&r()<.55){const s=this.shelters[Math.floor(r()*this.shelters.length)];if(this.isWater(s.x,s.y,this.habitat?this.fishMargin(f):0)){f.goal={x:s.x/w,y:s.y/h};f.goalTime=6+r()*8;return;}}
       for(let i=0;i<(this.habitat?16:8);i++){const gx=m+r()*(1-2*m),gy=m+r()*(1-2*m),dx=(gx-f.x)*w,dy=(gy-f.y)*h,d=Math.hypot(dx,dy);if(!this.isWater(gx*w,gy*h,this.habitat?this.fishMargin(f):0)||this.obstacles.some(o=>Math.hypot(gx*w-o.x,gy*h-o.y)<o.r+40))continue;const sc=-Math.abs(wrap(Math.atan2(dy,dx)-f.angle))*1.2+Math.min(d,span*.6)/span*2+r()*.6;if(sc>score){score=sc;best={x:gx,y:gy};}}
       f.goal=best||{x:f.x,y:f.y};f.goalTime=7+r()*12;
@@ -396,7 +382,7 @@
       }
       this.food=this.food.filter(p=>p.life>0&&!p.eaten&&this.isWater(p.x,p.y,4));
       const sdt=dt*clamp(speedFactor,.1,3);
-      const neighbours=this.allFish;
+      const neighbours=this.fish;
       for(const f of neighbours){wake(f,this.random);this.growFish(f,dt);this.confineFish(f);}
       for(const f of neighbours)this.swim(f,sdt,neighbours);
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
@@ -405,7 +391,7 @@
     }
     // Counts pairs that are swimming close together at a similar depth; cheap enough at 24 fish.
     trackBonds() {
-      const fish=this.allFish,w=this.width,h=this.height;
+      const fish=this.fish,w=this.width,h=this.height;
       for(let i=0;i<fish.length;i++){
         const a=fish[i];
         for(let j=i+1;j<fish.length;j++){
@@ -430,20 +416,20 @@
         else if(b===f.id){best=a;top=n;}
       }
       if(!best||top<6)return null;
-      return this.allFish.find(o=>o.id===best)||null;
+      return this.fish.find(o=>o.id===best)||null;
     }
-    swim(f,dt,neighbours=this.allFish) {
-      const w=this.width,h=this.height,s=f.size*this.scale,L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
+    swim(f,dt,neighbours=this.fish) {
+      const w=this.width,h=this.height,s=f.size*this.scale,L=BODY.length*s,random=this.random;
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
       let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite;
       // A pellet lying closer to the bank than her mouth can reach is not food yet: it is still drifting
       // out to open water. Lunging at it only pinned her against the shore frame after frame.
       const mouthRoom=this.fishMargin(f)-BODY.nose*s-Math.max(6,7*s);
-      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten||(this.habitat&&!this.isWater(p.x,p.y,mouthRoom)))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
+      for(const p of this.food){if(p.eaten||(this.habitat&&!this.isWater(p.x,p.y,mouthRoom)))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       // Anything unreachable by the bank is dropped for a moment after she bumps into it.
       f.foodCooldown=Math.max(0,(f.foodCooldown||0)-dt);
       if(f.foodCooldown>0)food=null;
-      let gx,gy,want,turnGain=silver?3.5:2,maxTurn=silver?2.4:1.3,sepW=2.4,boundW=3;
+      let gx,gy,want,turnGain=2,maxTurn=1.3,sepW=2.4,boundW=3;
       f.flee=Math.max(0,f.flee-dt);
       // Startle: a quick C-turn away, then a dash. The turn stays snappy; only the sprint is capped, so the
       // pond reads calmer without the fish looking sluggish.
@@ -461,11 +447,11 @@
         if(!f.goal||f.goalTime<=0||Math.hypot(f.goal.x*w-x,f.goal.y*h-y)<L*1.3)this.pickGoal(f);
         const a=Math.atan2(f.goal.y*h-y,f.goal.x*w-x)+Math.sin(this.time*.21+f.seed)*.45+Math.sin(this.time*.53+f.seed*1.7)*.2;
         gx=Math.cos(a);gy=Math.sin(a);
-        f.rest=Math.max(0,f.rest-dt);if(f.rest<=0&&random()<dt*.02)f.rest=silver?.6+random()*1.2:2+random()*4;
+        f.rest=Math.max(0,f.rest-dt);if(f.rest<=0&&random()<dt*.02)f.rest=2+random()*4;
         // Easing into and out of a rest, instead of the target speed jumping when the timer runs out.
         f.idle+=((f.rest>0?1:0)-f.idle)*Math.min(1,dt*1.4);
         want=f.cruise*L*(1-.88*f.idle);
-        if(random()<dt*.015)f.depthGoal=silver?.18+random()*.4:.15+random()*.75;
+        if(random()<dt*.015)f.depthGoal=.15+random()*.75;
       }
       // Neighbours: keep personal space, sidestep head-on meetings, loosely match heading.
       let sx=0,sy=0,ax=0,ay=0,cx=0,cy=0,companions=0;
@@ -474,12 +460,12 @@
         const R=(L+BODY.length*o.size*this.scale)*.52,near=1-Math.min(1,Math.abs(o.depth-f.depth)*1.6);
         if(d<R){const k=(1-d/R)**2*near;sx-=ox/d*k;sy-=oy/d*k;}
         if((ox*cos+oy*sin)/d>.8&&d<L*1.6&&near>.3){const side=(oy*cos-ox*sin)>0?-1:1,k=.35*(1-d/(L*1.6));sx-=sin*side*k;sy+=cos*side*k;}
-        if(!food&&d<L*2.5&&o.species===f.species){ax+=Math.cos(o.angle);ay+=Math.sin(o.angle);}
-        // Fish that like company drift toward their neighbours; the shoal always does.
-        if((f.species==='silvercarp'||f.company>0)&&o.species===f.species&&d<L*(f.species==='silvercarp'?5:3.6)){cx+=ox;cy+=oy;companions++;}
+        if(!food&&d<L*2.5){ax+=Math.cos(o.angle);ay+=Math.sin(o.angle);}
+        // Fish that like company drift toward their neighbours.
+        if(f.company>0&&d<L*3.6){cx+=ox;cy+=oy;companions++;}
       }
       if(companions&&f.flee<=0){
-        const d=Math.hypot(cx,cy),pull=f.species==='silvercarp'?.65:.22*(f.company||0);
+        const d=Math.hypot(cx,cy),pull=.22*(f.company||0);
         if(d>L&&pull>0){gx+=cx/d*pull;gy+=cy/d*pull;}
       }
       const al=Math.hypot(ax,ay);if(al>0){ax/=al;ay/=al;}
@@ -498,21 +484,21 @@
       // A loner keeps a wider berth; a sociable fish tolerates a closer crowd.
       const sepMul=f.company<0?1.35:f.company>0?.8:1;
       const desired=Math.atan2(gy+sy*sepW*sepMul+ay*.15+by*boundW,gx+sx*sepW*sepMul+ax*.15+bx*boundW);
-      f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
+      f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:4));
       f.angle=wrap(f.angle+f.turn*dt);
       // Thrust follows how much speed is still missing, so the tailbeat swells and fades with the effort
       // instead of snapping between "beating" and "gliding".
       const need=clamp((want-f.v)/(want*.55+1e-3),0,1);
       f.thrust+=(need-f.thrust)*Math.min(1,dt*(need>f.thrust?7:4));
       f.beating=f.thrust>.3;
-      if(f.v<want)f.v+=(want*1.28-f.v)*(1-Math.exp(-dt*(silver?3.4:2.4)*Math.max(.06,f.thrust)));
+      if(f.v<want)f.v+=(want*1.28-f.v)*(1-Math.exp(-dt*2.4*Math.max(.06,f.thrust)));
       else f.v*=Math.exp(-dt*(f.v>want*1.6?1.6:.5));
-      f.v*=Math.exp(-dt*Math.abs(f.turn)*(silver?.17:.25));
+      f.v*=Math.exp(-dt*Math.abs(f.turn)*.25);
       const bl=f.v/L;
       // Strokes per second follow the distance covered, not just the effort: a koi ambling at a third of a
       // body length per second beats about once, and one sprinting beats three or four times. Tying the rate
       // to thrust alone made the tail churn while the body barely moved.
-      f.phase=(f.phase+dt*TAU*(silver?1.22:1)*(.35+f.thrust*.5+bl*2.2+Math.abs(f.turn)*.45))%(TAU*1000);
+      f.phase=(f.phase+dt*TAU*(.35+f.thrust*.5+bl*2.2+Math.abs(f.turn)*.45))%(TAU*1000);
       // The tail sweeps wider through a turn, and the amplitude settles a little quicker than before.
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*4);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
@@ -549,7 +535,7 @@
   // fish is clamped to, so a fish made in the panel never comes back a different size.
   // Sprite width is BODY.width = 96, so size 1 is 96px long at pond scale 1: the max is the 96px upper bound.
   const KOI_SIZE = { min: .45, max: 1, initial: 1 };
-  const api={PALETTES,SILVER_CARP,KOI_SIZE,TEMPERS,TEMPER_TRAITS,koiAge,fishPalette,createSilverCarpShoal,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,KOI_SIZE,TEMPERS,TEMPER_TRAITS,koiAge,fishPalette,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);

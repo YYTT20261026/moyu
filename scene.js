@@ -1,13 +1,13 @@
-// Everything alive in the pond besides the simulation: koi drawing, turtles, butterflies, petals, weather.
+// Everything alive in the pond besides the simulation: koi drawing, turtles, frogs, butterflies, petals, weather.
 (function (root) {
   'use strict';
-  const { PALETTES, fishPalette, BODY, POND_MAPS, PondHabitat, clamp, wrap, fishPose } = root.PondCore;
+  const { PALETTES, fishPalette, BODY, POND_MAPS, PondHabitat, clamp, wrap, fishPose, randomSeed } = root.PondCore;
   const { halfWidth, girthOf } = root.PondArt;
   const TAU = Math.PI * 2;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
   const smoothstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-  // Things above the water in the supplied painting (assets/pond.jpg, 2560×1440).
+  // Things above the water in the supplied painting (assets/pond-runtime.png, 2560×1440).
   // [x, y, rx, kind, ry, rotation]; l = lotus/pennywort leaf, f = flower or petal, b = lotus bud, r = rock breaking the surface.
   const FLOATERS = [
     [110,365,124,'r',122],[981,94,97,'r',91],[1259,106,106,'r',104],
@@ -45,6 +45,8 @@
     autumn: { butterflies: [1], dragonflies: [0], fireflies: 0 },
     winter: { butterflies: [], dragonflies: [], fireflies: 0 }
   };
+  // Frogs have been retired from the pond; the sprite code stays for the atlas tests.
+  const SEASONAL_FROGS = { spring: 0, summer: 0, autumn: 0, winter: 0 };
   function floaterDefinitions(season) {
     const drifters = root.POND_DRIFTERS?.[season] || [];
     return (seasonalFloaters[season] || FLOATERS).filter(f => f[3] !== 'f' || f[2] > 25 || !drifters.some(d => Math.hypot(d.ix-f[0],d.iy-f[1]) < Math.max(d.w,d.h)));
@@ -55,8 +57,10 @@
   // blue = rests on the water and leaves a wet line (flowers on stalks do not).
   function floatMask(width, height, season='spring') {
     const map=POND_MAPS[season]||POND_MAPS.spring,defs=floaterDefinitions(season);
-    const k = .5, c = document.createElement('canvas'); c.width = Math.round(width * k); c.height = Math.round(height * k);
-    const ctx = c.getContext('2d');
+    // 底图可以是 8K；遮罩按标注尺度取样即可（采样用归一化坐标），不必跟着放大。
+    const k = Math.min(.5, map.width / width), c = document.createElement('canvas');
+    c.width = Math.round(width * k); c.height = Math.round(height * k);
+    const ctx = c.getContext('2d'), kx = c.width / map.width, ky = c.height / map.height;
     // The complete dry bank uses the same outline as swimming and feeding.
     // Preserve its original pixels instead of refracting water over the rocks.
     const path=points=>{ctx.beginPath();points.forEach(([u,v],i)=>i?ctx.lineTo(u*c.width,v*c.height):ctx.moveTo(u*c.width,v*c.height));ctx.closePath();};
@@ -67,7 +71,7 @@
     for (const f of defs) {
       const [x, y, rx, kind, ry = rx, rot = 0] = f, g = grow(f), stalk = kind === 'b' || (kind === 'f' && rx > 25);
       ctx.fillStyle = kind === 'r' ? 'rgb(255,0,0)' : stalk ? 'rgb(255,255,0)' : 'rgb(255,255,255)';
-      ctx.beginPath(); ctx.ellipse(x * k, y * k, rx * g * k, ry * g * k, rot, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x * kx, y * ky, rx * g * kx, ry * g * ky, rot, 0, TAU); ctx.fill();
     }
     return c;
   }
@@ -363,6 +367,176 @@
     }
   }
 
+  // Spring and summer frogs bask and croak on the stones that break the surface, then leap
+  // into the pond and paddle across it. Perches are kept in painting coordinates (like the
+  // crabs') so a frog stays on its stone when the pond is cropped or turned on a phone;
+  // swimming targets are open water found through the simulation's habitat.
+  class Frog {
+    constructor(variant, rnd) {
+      Object.assign(this, { variant, rnd, x: 0, y: 0, angle: rnd() * TAU, home: -1, u: 0, v: 0,
+        size: .88 + rnd() * .26, state: 'hidden', perch: true, alpha: 0, timer: .5 + rnd() * 4,
+        stroke: rnd() * TAU, ripple: 0, speed: 0, hop: 0, hopNow: 0, t: 0, dur: 1,
+        from: [0, 0], to: [0, 0], land: 'water', nextRock: null, target: null,
+        breath: rnd() * TAU, bob: 0, croak: 0, throat: 0 });
+      this.ripple = Math.floor(this.stroke / TAU);
+    }
+    at(R, homes, h, u, v) { const [x, y, rx, ry] = homes[h]; return R.imageToScreen(x + u * rx, y + v * ry); }
+    waterTarget(scene, near) {
+      const spots = scene.frogSpots, r = this.rnd, scale = scene.scale;
+      let pool = spots;
+      if (near) {
+        const close = spots.filter(p => { const d = Math.hypot(p[0] - this.x, p[1] - this.y); return d > 40 * scale && d < 360 * scale; });
+        if (close.length) pool = close;
+      }
+      if (!pool.length) return null;
+      const p = pool[Math.floor(r() * pool.length)];
+      return scene.sim.habitat.project(p[0], p[1], 18 * scale);
+    }
+    rockTarget(scene) {
+      const homes = scene.frogHomes, r = this.rnd;
+      if (!homes.length) return null;
+      const pool = homes.filter(h => h !== this.home), list = pool.length ? pool : homes;
+      const a = r() * TAU, d = Math.sqrt(r()) * .5;
+      return { home: list[Math.floor(r() * list.length)], u: Math.cos(a) * d, v: Math.sin(a) * d };
+    }
+    emerge(scene) {
+      const r = this.rnd, rock = scene.frogHomes.length && r() < .65;
+      if (rock) {
+        const a = r() * TAU, d = Math.sqrt(r()) * .5;
+        this.home = scene.frogHomes[Math.floor(r() * scene.frogHomes.length)];
+        this.u = Math.cos(a) * d; this.v = Math.sin(a) * d;
+        [this.x, this.y] = this.at(scene.R, scene.frogHomeDefs, this.home, this.u, this.v);
+        this.perch = true; this.state = 'rest';
+      } else {
+        const p = this.waterTarget(scene, false);
+        if (!p) { this.timer = 1; return; }
+        [this.x, this.y] = p; this.home = -1; this.perch = false; this.state = 'float';
+      }
+      this.angle = r() * TAU; this.alpha = 0; this.hopNow = 0; this.timer = 2 + r() * 5;
+    }
+    beginLeap(scene, tx, ty, land, rock = null) {
+      const d = Math.hypot(tx - this.x, ty - this.y);
+      this.from = [this.x, this.y]; this.to = [tx, ty]; this.t = 0;
+      this.dur = clamp(.38 + d / (520 * scene.scale), .4, 1.15);
+      this.hop = clamp(d * .16, 12, 56) * scene.scale * this.size;
+      this.land = land; this.nextRock = rock; this.state = 'leap';
+      this.angle = Math.atan2(ty - this.y, tx - this.x);
+    }
+    choose(scene) {
+      const r = this.rnd, water = this.waterTarget(scene, true), rock = this.rockTarget(scene);
+      const toRock = this.perch ? r() < .2 : r() < .45;
+      if (toRock && rock) {
+        const [tx, ty] = this.at(scene.R, scene.frogHomeDefs, rock.home, rock.u, rock.v);
+        this.beginLeap(scene, tx, ty, 'rock', rock);
+      } else if (water) {
+        const d = Math.hypot(water[0] - this.x, water[1] - this.y);
+        if (this.perch || d > 340 * scene.scale) this.beginLeap(scene, water[0], water[1], 'water');
+        else { this.state = 'swim'; this.target = water; this.timer = 4 + r() * 4; }
+      } else this.timer = 1 + r() * 2;
+    }
+    startle(x, y, radius, scene) {
+      if (this.state === 'hidden' || this.state === 'leap' || Math.hypot(this.x - x, this.y - y) > radius) return;
+      const spots = scene.frogSpots.filter(p => Math.hypot(p[0] - x, p[1] - y) > radius * .8);
+      const p = spots.length ? spots[Math.floor(this.rnd() * spots.length)] : null;
+      const to = p && scene.sim.habitat.project(p[0], p[1], 18 * scene.scale);
+      if (!to) return;
+      this.beginLeap(scene, to[0], to[1], 'water'); this.dur *= .75;
+      scene.R.drop(this.x, this.y, 5 * scene.scale, .08);
+    }
+    update(dt, scene, settings) {
+      const r = this.rnd, scale = scene.scale;
+      const allowed = settings.frogs !== false && scene.frogCount > 0 && settings.weather !== 'snow';
+      if (!allowed) { this.alpha = Math.max(0, this.alpha - dt * 1.6); if (this.alpha <= 0) this.state = 'hidden'; return; }
+      if (this.state === 'hidden') {
+        this.timer -= dt;
+        if (this.timer <= 0 && scene.frogSpots.length) this.emerge(scene);
+        return;
+      }
+      this.alpha = Math.min(1, this.alpha + dt * 1.4);
+      this.breath += dt;
+      if (this.croak > 0) this.croak -= dt;
+      else if ((this.state === 'rest' || this.state === 'float') && r() < dt * (settings.night ? .3 : .12)) this.croak = 1.15;
+      const call = this.croak > 0 ? Math.pow(Math.max(0, Math.sin((1.15 - this.croak) * 9.5)), 1.4) : 0;
+      this.throat = Math.max(.12 + .1 * Math.sin(this.breath * 2.4), call);
+      this.bob = Math.sin(this.breath * 1.6) * .7 * scale;
+      if (this.state === 'rest' || this.state === 'float') {
+        this.timer -= dt;
+        if (this.state === 'rest' && this.home >= 0 && scene.frogHomeDefs[this.home])
+          [this.x, this.y] = this.at(scene.R, scene.frogHomeDefs, this.home, this.u, this.v);
+        if (this.timer <= 0) this.choose(scene);
+        return;
+      }
+      if (this.state === 'swim') {
+        const t = this.target, dx = t[0] - this.x, dy = t[1] - this.y, d = Math.hypot(dx, dy);
+        const want = Math.atan2(dy, dx);
+        this.angle += clamp(wrap(want - this.angle), -dt * 3.4, dt * 3.4);
+        this.stroke += dt * TAU * 1.15;
+        const power = Math.max(0, Math.sin(this.stroke));
+        this.speed += (power * 52 * scale - this.speed) * Math.min(1, dt * 5);
+        this.x += Math.cos(this.angle) * this.speed * dt;
+        this.y += Math.sin(this.angle) * this.speed * dt;
+        const safe = scene.sim.habitat.project(this.x, this.y, 17 * scale);
+        if (safe) [this.x, this.y] = safe;
+        // One little wake per kick, sent straight to the GPU so the pond's two big ripples
+        // stay free; the Canvas fallback has only two ring slots, so it keeps those for landings.
+        const beat = Math.floor(this.stroke / TAU);
+        if (beat !== this.ripple) {
+          this.ripple = beat;
+          if (scene.R.ripples !== false) scene.R.drop(this.x - Math.cos(this.angle) * 10 * scale, this.y - Math.sin(this.angle) * 10 * scale, 4 * scale, .06);
+        }
+        this.timer -= dt;
+        if (d < 18 * scale || this.timer <= 0) { this.state = 'float'; this.perch = false; this.timer = 1.5 + r() * 4; }
+        return;
+      }
+      if (this.state === 'leap') {
+        this.t += dt / this.dur;
+        const k = clamp(this.t, 0, 1), e = k * k * (3 - 2 * k);
+        this.x = this.from[0] + (this.to[0] - this.from[0]) * e;
+        this.y = this.from[1] + (this.to[1] - this.from[1]) * e;
+        this.hopNow = Math.sin(Math.PI * k) * this.hop;
+        if (this.t >= 1) {
+          this.hopNow = 0; this.perch = this.land === 'rock';
+          if (this.perch && this.nextRock) { this.home = this.nextRock.home; this.u = this.nextRock.u; this.v = this.nextRock.v; }
+          else this.home = -1;
+          if (!this.perch) scene.R.drop(this.x, this.y, 9 * scale, .18);
+          this.state = this.perch ? 'rest' : 'float';
+          this.timer = 2 + r() * 5;
+        }
+      }
+    }
+    draw(R, scale, look) {
+      if (this.state === 'hidden' || this.alpha <= 0) return;
+      const S = R.sprites, v = this.variant, s = scale * 1.0 * this.size, A = this.alpha;
+      const lift = this.state === 'leap' ? this.hopNow : 0;
+      const bob = this.state === 'rest' || this.state === 'float' ? this.bob : 0;
+      const x = this.x, y = this.y - lift + bob;
+      const a = this.angle, c = Math.cos(a), si = Math.sin(a);
+      const at = (lx, ly) => [x + (lx * c - ly * si) * s, y + (lx * si + ly * c) * s];
+      const lit = [look.bright * look.tint[0] * A, look.bright * look.tint[1] * A, look.bright * look.tint[2] * A, A];
+      const layer = lift > 2 * scale ? 'air' : 'surface';
+      const off = (3 + lift * .18) * scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off + lift;
+      const fade = clamp(1 - lift / (90 * scale), .35, 1);
+      R.sprite(lift > 2 * scale ? 'airShadow' : 'surface', S[`frog${v}_body`], this.x + dx, this.y + dy, a, s * 1.04, s * 1.04, [0, 0, 0, .3 * A * fade]);
+      const part = (name, lx, ly, ang, flip, color = lit, size = s) => {
+        const [px, py] = at(lx, ly);
+        R.sprite(layer, S[`frog${v}_${name}`], px, py, ang, size, flip ? -size : size, color);
+      };
+      const kicked = this.state === 'swim' || this.state === 'leap';
+      for (const side of [1, -1]) {
+        const k = this.state === 'swim' ? Math.max(0, Math.sin(this.stroke + (side > 0 ? 0 : Math.PI))) : this.state === 'leap' ? .85 : 0;
+        part('hind', -10, side * 5.4, a + side * (1.95 + k * .8), side < 0);
+      }
+      // The sac stays tucked under the chin and only swells into view on a croak.
+      const [tx, ty] = at(8, 0), ts = s * (.5 + .5 * this.throat);
+      R.sprite(layer, S[`frog${v}_throat`], tx, ty, a, ts, ts, [lit[0], lit[1], lit[2], A * (.08 + .55 * this.throat)]);
+      for (const side of [1, -1]) {
+        const swing = kicked ? .12 * Math.sin(this.stroke + side) : 0;
+        part('front', 7, side * 5.2, a + side * (.6 + swing), side < 0);
+      }
+      part('body', 0, 0, a, false, lit, s * (1 + (this.state === 'leap' ? .06 : 0)));
+    }
+  }
+
   // Things two koi might say to each other, chosen by the speaker's temperament.
   const CHAT_LINES = {
     greedy: ['那边好像又掉了一粒', '我先去看看', '今天的食不太够'],
@@ -378,6 +552,9 @@
       this.butterflies = [0, 1, 2].map(s => new Butterfly(s, rnd));
       this.dragonflies = [0, 1].map(s => new Dragonfly(s, rnd));
       this.crabs = [0, 1, 0].map(v => new Crab(v, rnd)); this.crabHomes = [];
+      // Their own seeded stream keeps frog wandering from changing the pond's other random events.
+      this.frogs = [0, 1, 0, 1].map((v, i) => new Frog(v, randomSeed(5071 + i * 977)));
+      this.frogHomes = []; this.frogHomeDefs = []; this.frogSpots = []; this.frogCount = 0; this.activeFrogs = [];
       this.petals = []; this.flies = []; this.lures = []; this.rain = []; this.snow = []; this.splashes = []; this.motes = []; this.wakes = new Map();
       this.lotusPlants = []; this.plantRipples = []; this.waterRipples = [];
       this.lotusBuds = []; this.bloomStart = 0; this.lanterns = []; this.sparkles = [];
@@ -399,7 +576,6 @@
       for (const d of this.dragonflies) Object.assign(d, { target: null, state: 'hover', vx: 0, vy: 0, alt: .7, timer: 1, touched: false });
       this.flies.length = 0;
       const driftDefs = root.POND_DRIFTERS?.[this.season] || [];
-      // Extracted blossoms are now independent sprites; stop redrawing their old image locations.
       this.floaterDefs=floaterDefinitions(this.season);
       this.lotusDefs=this.floaterDefs.filter(f=>f[3]==='f'&&f[2]>25);
       const rnd=this.rnd,rank=f=>({r:0,l:1,f:f[2]>25?4:2,b:3})[f[3]];
@@ -407,6 +583,10 @@
       this.floaters=this.floaterDefs.map(f=>({f,p:[rnd()*TAU,rnd()*TAU,rnd()*TAU,rnd()*TAU],sp:.8+rnd()*.4,seed:rnd(),snow:1,ja:0,jv:0,ox:0,oy:0,vx:0,vy:0,dx:0,dy:0})).sort((a,b)=>rank(a.f)-rank(b.f)||b.f[2]-a.f[2]);
       this.crabHomeDefs=this.season==='spring'?CRAB_HOMES:this.floaterDefs.filter(f=>f[3]==='r').map(([x,y,rx,,ry])=>[x,y,rx*.6,ry*.6]);
       for(const c of this.crabs){c.homes=this.crabHomeDefs;c.home=0;c.state='hidden';c.alpha=0;c.timer=1+rnd()*5;}
+      this.frogCount=SEASONAL_FROGS[this.season]||0;
+      this.activeFrogs=this.frogs.slice(0,this.frogCount);
+      this.frogHomeDefs=this.floaterDefs.filter(f=>f[3]==='r').map(([x,y,rx,,ry])=>[x,y,rx*.55,ry*.55]);
+      for(const f of this.frogs)Object.assign(f,{state:'hidden',alpha:0,home:-1,perch:true,hopNow:0,timer:.5+f.rnd()*3});
       this.petals.length=0;this.splashes.length=0;this.rain.length=0;this.wakes.clear();this.waterRipples.length=0;
       this.snowCover=0;this.wetCover=0;
       // A new summer starts with its bud closed again and grows its next stalks from scratch.
@@ -426,7 +606,7 @@
     // Looks for two koi that keep each other company and happen to be side by side right now.
     spawnChat() {
       const w = this.w, h = this.h;
-      for (const a of this.sim.allFish) {
+      for (const a of this.sim.fish) {
         const b = this.sim.bestFriend(a);
         if (!b || !b.id || a.id >= b.id) continue;
         if (Math.hypot((a.x - b.x) * w, (a.y - b.y) * h) > 130) continue;
@@ -447,9 +627,11 @@
       }
       return out;
     }
-    // Something disturbed the water at (x, y): crabs close by bolt for it and dive.
+    // Something disturbed the water at (x, y): crabs close by bolt for it and dive,
+    // frogs hop into open water, turtles swim away.
     startle(x, y) {
       for (const c of this.crabs) c.startle(x, y, 130 * this.scale, this.R);
+      for (const f of this.activeFrogs) f.startle(x, y, 150 * this.scale, this);
       for (const t of this.turtles) t.startle(x, y, this.w, this.h, 170 * this.scale, this.sim.habitat);
     }
     drop(x, y, r, s, rain = false) {
@@ -706,9 +888,15 @@
       // Keep the patch in the visible lower-left corner even when the pond rotates on a phone.
       // Project the whole plant's footprint into water, away from rocks and the dry bank.
       this.plantRipples.length = 0;
-      const [ix, iy] = R.imageToScreen(590, 930);
+      // Keep the patch in the lower-left of the water regardless of the bed's on-screen scale.
+      // Tests draw the bed 1:1, the page may shrink a 8K image to a fraction of that size.
+      const probe = R.imageToScreen(1000, 1000), map = POND_MAPS[this.season];
+      const scale = Math.min(probe[0] / 1000, probe[1] / 1000);
+      const [ix, iy] = scale < .5
+        ? R.imageToScreen(map.width * .234, map.height * .625)
+        : R.imageToScreen(690, 930);
       this.lotusPlants=LOTUS_PLANTS[this.season].map(([sprite,dx,dy,size,angle],i)=>{
-        const s=size*this.scale,leaf=sprite.includes('Leaf'),r=(leaf?48:sprite==='lotusStem'?82:72)*s,motionMargin=20*this.scale;
+        const s=size*this.scale,leaf=sprite.includes('Leaf'),r=(leaf?48:sprite==='lotusStem'?82:72)*s,motionMargin=50*this.scale;
         const [x,y]=this.sim.habitat.project(ix+dx*this.scale,iy+dy*this.scale,r+motionMargin);
         return {sprite,x,y,s,angle,phase:i*2.17,r,leaf,motionMargin,rootOffset:sprite==='lotusFlower'?30*s:0,water:leaf?.35:0,pool:leaf?.35:0,ox:0,oy:0,vx:0,vy:0,ja:0,jv:0,bend:0,bv:0};
       });
@@ -733,6 +921,17 @@
       // Crabs only live on the rocks and banks that are on screen.
       this.crabHomes = this.crabHomeDefs.map((c, i) => [i, R.imageToScreen(c[0], c[1])]).filter(([, [x, y]]) => x > 30 && x < w - 30 && y > 30 && y < h - 30).map(([i]) => i);
       for (const c of this.crabs) if (!this.crabHomes.includes(c.home)) { c.state = 'hidden'; c.timer = 1 + this.rnd() * 5; }
+      // Frogs perch on those same emergent stones and paddle between open-water spots.
+      this.frogHomes = this.frogHomeDefs.map((c, i) => [i, R.imageToScreen(c[0], c[1])]).filter(([, [x, y]]) => x > 30 && x < w - 30 && y > 30 && y < h - 30).map(([i]) => i);
+      this.frogSpots = [];
+      const margin = 34 * this.scale;
+      for (let gy = 1; gy <= 7; gy++) for (let gx = 1; gx <= 9; gx++) {
+        const [sx, sy] = R.imageToScreen(2560 * gx / 10, 1440 * gy / 8);
+        if (sx < margin || sx > w - margin || sy < margin || sy > h - margin) continue;
+        const safe = this.sim.habitat.project(sx, sy, 20 * this.scale);
+        if (safe) this.frogSpots.push(safe);
+      }
+      for (const f of this.frogs) if (f.state !== 'hidden' && (f.x < 0 || f.x > w || f.y < 0 || f.y > h)) { f.state = 'hidden'; f.alpha = 0; f.timer = .5 + f.rnd() * 2; }
       this.causticCell = clamp(Math.min(w, h) / 7, 70, 150);
       const [mx, my] = R.imageToScreen(1000, 255); this.moonAt = [clamp(mx, w * .2, w * .8), clamp(my, h * .15, h * .5)]; this.phaseAt = 0;
       for (const b of this.butterflies) { if (b.x < 0) { b.x = this.rnd() * w; b.y = this.rnd() * h; } else { b.x *= w / this.prevW; b.y *= h / this.prevH; } b.target = null; b.state = 'fly'; }
@@ -761,7 +960,7 @@
           this.highlightTick = (this.highlightTick || 0) - dt;
           if (this.highlightTick <= 0) {
             this.highlightTick = .45;
-            const f = this.sim.allFish.find(o => o.id === this.highlight.id);
+            const f = this.sim.fish.find(o => o.id === this.highlight.id);
             if (f) this.drop(f.x * this.w, f.y * this.h, 24 * this.scale, .55);
           }
         } else this.highlight = null;
@@ -786,6 +985,8 @@
       // Crabs come out in any weather but snow.
       const crabsOut = settings.crabs !== false && weather !== 'snow';
       for (const c of this.crabs) c.update(dt, this.R, scale, this.crabHomes, crabsOut, this, this.crabs.filter(o => o !== c && o.state !== 'hidden').map(o => o.home));
+      // Frogs only come out in spring and summer, croaking more often after dark.
+      for (const f of this.activeFrogs) f.update(dt, this, settings);
       if (this.butterflyWeather(settings)) for (const b of this.activeButterflies) b.update(dt, w, h, scale, this.spots, this.time);
       if (this.dragonflyWeather(settings)) for (const d of this.activeDragonflies) d.update(dt, w, h, scale, this, this.buds.length ? this.buds : this.spots, this.time);
       // Fireflies belong to dry summer nights, never winter or falling snow.
@@ -911,7 +1112,7 @@
         if (f.life <= 0) { f.melt = .6; if (rnd() < .5) this.drop(f.x, f.y, (2 + f.z * 2) * scale, .04 + f.z * .05); }
       }
       // Koi cruising just under the surface leave faint wakes.
-      for (const f of this.sim.allFish) {
+      for (const f of this.sim.fish) {
         if (f.v === undefined) continue;
         const L = BODY.length * f.size * this.sim.scale, bl = f.v / L;
         if (f.depth < .22 && bl > .45) {
@@ -1009,10 +1210,10 @@
       if (bud > .01) this.plantSprite(def, x, y, angle, sx * grow, sy * grow, bend, leaf, off, bud);
     }
     bodyLight(f) {
-      if (!f.light || f.light.seed !== f.seed || f.light.palette !== f.palette || f.light.species !== f.species) {
+      if (!f.light || f.light.seed !== f.seed || f.light.palette !== f.palette) {
         const girth = girthOf(f.seed), widths = new Float32Array(BODY.segments + 1), kind = fishPalette(f).kind;
-        for (let i = 0; i <= BODY.segments; i++) widths[i] = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girth, kind) / BODY.half;
-        f.light = { species: f.species, seed: f.seed, palette: f.palette, widths, metal: kind === 'ogon' ? 1 : 0, gloss: kind === 'ogon' ? .28 : kind === 'karasu' ? .14 : .32 };
+        for (let i = 0; i <= BODY.segments; i++) widths[i] = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girth) / BODY.half;
+        f.light = { seed: f.seed, palette: f.palette, widths, metal: kind === 'ogon' ? 1 : 0, gloss: kind === 'ogon' ? .28 : kind === 'karasu' ? .14 : .32 };
       }
       return f.light;
     }
@@ -1023,19 +1224,19 @@
       // one cruising at the surface casts it further off, larger in blur and a little paler.
       const off = (6 + (1 - f.depth) * 30) * this.scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .72 - (1 - f.depth) * .18], blur = [(1 - f.depth) * 1.1, 0, 0, 0];
       // Pectoral fins spread when gliding or braking, fold back at speed, the inner one flares in a turn.
-      const L = BODY.length * s, bl = f.v / L, pal = fishPalette(f), slender = pal.kind === 'silvercarp', finDef = R.sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'];
-      const tint = pal.kind === 'utsuri' ? [1, 1, 1, .92] : f.species === 'silvercarp' ? [...rgb(pal.fin), .85] : this.finTint[f.palette];
+      const L = BODY.length * s, bl = f.v / L, pal = fishPalette(f), finDef = R.sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'];
+      const tint = pal.kind === 'utsuri' ? [1, 1, 1, .92] : this.finTint[f.palette];
       // Eased, not switched: the fanning fades out as the fish picks up thrust, so it never pops on and off.
       const fan = clamp(1 - f.thrust / .45, 0, 1);
       const base = 1.05 - .6 * clamp(bl / 1.4, 0, 1) + Math.sin(this.time * 4.2 + f.seed) * .16 * fan;
       const fins = [[4, .95, 1], [8, .55, .58]];
       for (const [i, spreadK, size] of fins) {
-        const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girthOf(f.seed), pal.kind) * s * .8;
+        const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * BODY.length / BODY.segments, girthOf(f.seed)) * s * .8;
         for (const side of [1, -1]) {
           const spread = (base + clamp(side * f.turn * .35, -.3, .5)) * spreadK, ang = heading + side * (Math.PI - spread);
           const X = cx + (px + nx * hw * side - cx) * k, Y = cy + (py + ny * hw * side - cy) * k, fs = s * k * .85 * size;
-          R.sprite('under', finDef, X, Y, ang, fs * (slender ? .88 : 1), side * fs * (slender ? .5 : 1), tint, fog);
-          if (size === 1) R.sprite('shadow', finDef, X + dx, Y + dy, ang, fs * (slender ? .88 : 1), side * fs * (slender ? .5 : 1), [0, 0, 0, sh[3] * .6], blur);
+          R.sprite('under', finDef, X, Y, ang, fs, side * fs, tint, fog);
+          if (size === 1) R.sprite('shadow', finDef, X + dx, Y + dy, ang, fs, side * fs, [0, 0, 0, sh[3] * .6], blur);
         }
       }
       R.fish('shadow', cell, pose, s, cx, cy, k, sh, blur, dx, dy);
@@ -1044,7 +1245,7 @@
     draw(settings) {
       const R = this.R, look = this.look, { w, h, scale } = this, sim = this.sim;
       // Underwater, deepest first.
-      const items = sim.allFish.map((f, i) => ({ d: f.depth ?? .5, f, i }));
+      const items = sim.fish.map((f, i) => ({ d: f.depth ?? .5, f, i }));
       if (settings.turtles) for (const t of this.turtles) items.push({ d: t.depth + .02, t });
       items.sort((a, b) => b.d - a.d);
       for (const it of items) { if (it.t) it.t.draw(R, w, h, scale, look); else if (it.f.spriteReady && it.f.spine) this.koi(it.f, it.i); }
@@ -1126,6 +1327,7 @@
         }
       }
       for (const c of this.crabs) c.draw(R, scale, look);
+      for (const f of this.activeFrogs) f.draw(R, scale, look);
       // A summoned firefly light: a warm pool on the water with a soft halo above it.
       for (const l of this.lures) {
         const g = this.lureGlow(l);
@@ -1175,12 +1377,12 @@
   function drawKoi2D(ctx, f, sprite, sprites, x, y, angle, s, amp = .4) {
     const n = BODY.segments, seg = BODY.length / n, spine = new Float32Array((n + 1) * 2), c = Math.cos(angle), si = Math.sin(angle);
     for (let i = 0; i <= n; i++) { spine[i * 2] = x + c * (BODY.nose - i * seg) * s; spine[i * 2 + 1] = y + si * (BODY.nose - i * seg) * s; }
-    const pose = fishPose({ spine, amp, phase: f.phase || 0, species: f.species }, s), pal = fishPalette(f);
-    const finDef = sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'], fin = pal.kind === 'utsuri' ? finDef.canvas : tintedFin(finDef, pal.fin, pal.kind === 'benigoi' || pal.kind === 'silvercarp');
+    const pose = fishPose({ spine, amp, phase: f.phase || 0 }, s), pal = fishPalette(f);
+    const finDef = sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'], fin = pal.kind === 'utsuri' ? finDef.canvas : tintedFin(finDef, pal.fin, pal.kind === 'benigoi');
     for (const [i, spread, size] of [[8, .6, .58], [4, 1, 1]]) {
-      const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * seg, girthOf(f.seed), pal.kind) * s * .8;
+      const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * seg, girthOf(f.seed)) * s * .8;
       for (const side of [1, -1]) {
-        ctx.save(); ctx.translate(px + nx * hw * side, py + ny * hw * side); ctx.rotate(heading + side * (Math.PI - spread)); ctx.scale(s * .85 * size / finDef.ppu * (pal.kind === 'silvercarp' ? .88 : 1), side * s * .85 * size / finDef.ppu * (pal.kind === 'silvercarp' ? .5 : 1));
+        ctx.save(); ctx.translate(px + nx * hw * side, py + ny * hw * side); ctx.rotate(heading + side * (Math.PI - spread)); ctx.scale(s * .85 * size / finDef.ppu, side * s * .85 * size / finDef.ppu);
         ctx.globalAlpha = .9; ctx.drawImage(fin, -finDef.px * fin.width, -finDef.py * fin.height); ctx.restore();
       }
     }

@@ -476,9 +476,14 @@ void main(){
     return [(e * x - b * y) / det * w, (a * y - d * x) / det * h];
   }
 
-  function createGL(canvas, bedImage, sprites, onLost, floatMask) {
+  // The painting can be any resolution (the bed is 8K), but every annotation lives in the
+  // 2560×1440 design space of POND_MAP. Coordinates below are design pixels, so a sharper
+  // bed image only changes the texture, never where the lotus, rocks or koi sit.
+  function createGL(canvas, bedImage, sprites, onLost, floatMask, design) {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'default' });
     if (!gl) return null;
+    // 0 means "not given": coordinates then follow the bed image's own pixel size, as before.
+    const designW = (design && design.width) || 0, designH = (design && design.height) || 0;
     const floatRT = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
     gl.getExtension('OES_texture_float_linear');
     let lost = false;
@@ -524,12 +529,23 @@ void main(){
     const noiseTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, noiseData(256), gl.LINEAR, gl.REPEAT);
     const waveTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, waveData(256), gl.LINEAR, gl.REPEAT);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    // An 8K painting exceeds the texture limit of some GPUs (often 4096). Upload the largest
+    // size the device accepts instead: sampling is normalized, so the painting and every
+    // design-space annotation still line up exactly.
+    const maxTex = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 0;
+    function fitTexture(source) {
+      if (!source || !maxTex || (source.width <= maxTex && source.height <= maxTex)) return source;
+      const k = maxTex / Math.max(source.width, source.height), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(source.width * k)); c.height = Math.max(1, Math.round(source.height * k));
+      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      return c;
+    }
     let bedTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, bedTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bedImage); gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, fitTexture(bedImage)); gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     let floatTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, floatTex);
-    if (floatMask) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, floatMask);
+    if (floatMask) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, fitTexture(floatMask));
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
     gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -540,7 +556,7 @@ void main(){
       if(backgrounds.has(image)||lost)return;
       const upload=source=>{
         const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
-        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,fitTexture(source));gl.generateMipmap(gl.TEXTURE_2D);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
         return tex;
@@ -581,8 +597,9 @@ void main(){
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       state.bed = fitBed(bedImage.width, bedImage.height, w, h);
     }
-    // Map a point of the painted pond image to screen CSS pixels.
-    function imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); }
+    // Map a point of the painting's design space (POND_MAP 2560×1440) to screen CSS pixels.
+    // Without an explicit design, coordinates are the bed image's own pixels.
+    function imageToScreen(x, y) { return bedToScreen(state.bed, x / (designW || bedImage.width), y / (designH || bedImage.height), state.w, state.h); }
     function setBed(p) { gl.uniform3fv(p.u('uBedU'), state.bed.u); gl.uniform3fv(p.u('uBedV'), state.bed.v); }
 
     function setFish(i, sprite) {
@@ -736,9 +753,9 @@ void main(){
         drops.length=0;
       },
       drop(x, y, r, s) { if (drops.length < 96) drops.push([x, y, r, s]); },
-      // One leaf, flower or rock from the painting (image px ellipse), turned by angle and moved by (dx, dy) screen px.
+      // One leaf, flower or rock from the painting (design-space ellipse), turned by angle and moved by (dx, dy) screen px.
       floater(ix, iy, irx, iry, rot, angle, dx, dy, push, snowK = 1, wetKind = 1, pool = 0, seed = 0) {
-        const b = batches.floaters, W = bedImage.width, H = bedImage.height, [sx, sy] = imageToScreen(ix, iy), m = 1.08;
+        const b = batches.floaters, W = designW || bedImage.width, H = designH || bedImage.height, [sx, sy] = imageToScreen(ix, iy), m = 1.08;
         const [x0, y0] = imageToScreen(0, 0), [x1, y1] = imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0), turn = state.bed.turn * Math.PI / 2;
         const cr = Math.cos(rot), sr = Math.sin(rot), ca = Math.cos(rot + angle + turn), sa = Math.sin(rot + angle + turn), n = b.nv, pr = Math.max(irx, iry) * k + 3;
         const probe = [sx / state.w, 1 - sy / state.h, pr / state.w, pr / state.h];
@@ -819,9 +836,10 @@ void main(){
   }
 
   // ---------- Canvas 2D fallback ----------
-  function create2D(canvas, bedImage, sprites) {
+  function create2D(canvas, bedImage, sprites, design) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
+    const designW = (design && design.width) || 0, designH = (design && design.height) || 0;
     const state = { w: 1, h: 1, dpr: 1, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } }, fishCanvases = [], rings = [], queue = {};
     for (const l of LAYERS) queue[l] = [];
     return {
@@ -834,7 +852,7 @@ void main(){
         // The CSS backdrop behind this canvas is a plain centred cover crop, so the painting is never turned here.
         state.bed = fitBed(bedImage.width, bedImage.height, w, h, false);
       },
-      imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); },
+      imageToScreen(x, y) { return bedToScreen(state.bed, x / (designW || bedImage.width), y / (designH || bedImage.height), state.w, state.h); },
       setFish(i, sprite) { const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },
       drop(x, y, r, s) { if (s > .05 && rings.length < 2) rings.push({ x, y, age: 0, max: 1.2 }); },
       floater() {},
@@ -877,10 +895,12 @@ void main(){
   }
 
   // Returns the renderer and the canvas it drew on (a fresh one if WebGL grabbed the original and then failed).
-  function createRenderer(canvas, bedImage, sprites, onLost, floatMask) {
-    try { const r = createGL(canvas, bedImage, sprites, onLost, floatMask); if (r) return Object.assign(r, { canvas }); } catch (e) { console.warn('WebGL2 pond unavailable, using 2D', e); }
-    let target = canvas, r = create2D(target, bedImage, sprites);
-    if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites); }
+  // design is the painting's annotation space (POND_MAP.width×height); it defaults to the bed's own
+  // pixel size, so a bed already drawn at design resolution behaves exactly as before.
+  function createRenderer(canvas, bedImage, sprites, onLost, floatMask, design) {
+    try { const r = createGL(canvas, bedImage, sprites, onLost, floatMask, design); if (r) return Object.assign(r, { canvas }); } catch (e) { console.warn('WebGL2 pond unavailable, using 2D', e); }
+    let target = canvas, r = create2D(target, bedImage, sprites, design);
+    if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites, design); }
     return r && Object.assign(r, { canvas: target });
   }
   root.PondGL = { createRenderer, drawStrip2D, fitBed, bedToScreen, FISH_PPU, MAX_FISH };

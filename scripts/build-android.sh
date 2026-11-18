@@ -1,9 +1,10 @@
 #!/bin/zsh
-# 碧池观鱼 · build the Android live-wallpaper APK into android/build/碧池观鱼.apk (copied to dist/ as well)
+# 摸鱼 · build the Android live-wallpaper APK into android/build/摸鱼.apk (copied to dist/ as well)
 # Requires a one-time toolchain under ~/android-build (override with ANDROID_BUILD env):
 #   dl/jdk.tar.gz        Temurin JDK 17 (macOS aarch64)   → jdk/
 #   dl/build-tools.zip   https://dl.google.com/android/repository/build-tools_r34-macosx.zip → bt/
 #   dl/platform-34.zip   https://dl.google.com/android/repository/platform-34-ext7_r03.zip   → plat/
+# Also needs python3 with Pillow (scripts/prepare-mobile.py shrinks the 8K beds for the phone).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK_ROOT="${ANDROID_BUILD:-$HOME/android-build}"
@@ -18,7 +19,12 @@ cd "$ROOT/android"
 # Package the current pond, never a stale copy: assets/ is rebuilt from the web sources every time.
 rm -rf assets && mkdir -p assets/assets
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do cp "$ROOT/$f" assets/; done
-cp "$ROOT"/assets/pond*.jpg "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/favicon.svg" assets/assets/
+# The phone gets 2560×1440 beds: the 8K ones are 169 MB of embedded base64 and 132 MB per decoded
+# bitmap, which overruns a phone's WebView and GPU (most cap textures at 4096) — see prepare-mobile.py.
+PYTHON="${PYTHON:-$(command -v python3)}"
+"$PYTHON" "$ROOT/scripts/prepare-mobile.py"
+cp "$ROOT"/build/mobile/stills/pond*.png "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/favicon.svg" assets/assets/
+cp "$ROOT/build/mobile/pond-bed.js" assets/assets/pond-bed.js
 cp -R "$ROOT/assets/audio" assets/assets/
 
 # Keep the signing key between builds, so a new APK installs over the old one without losing the pond.
@@ -40,6 +46,6 @@ if [[ ! -f build/bichi.keystore ]]; then
 fi
 "$BT/apksigner" sign --ks build/bichi.keystore --ks-pass pass:bichipond --key-pass pass:bichipond \
   --out "build/摸鱼.apk" build/aligned.apk
-"$BT/apksigner" verify "build/碧池观鱼.apk"
+"$BT/apksigner" verify "build/摸鱼.apk"
 mkdir -p "$ROOT/dist" && cp "build/摸鱼.apk" "$ROOT/dist/摸鱼.apk"
 echo "✓ build/摸鱼.apk ($(du -h "build/摸鱼.apk" | cut -f1)), also at dist/摸鱼.apk — transfer to a phone and install"

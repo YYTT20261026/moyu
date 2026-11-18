@@ -10,7 +10,7 @@ vm.runInNewContext(fs.readFileSync(require.resolve('../art.js'), 'utf8'), contex
 const art = context.window.PondArt;
 test('锦鲤头部是圆钝的吻部、明显窄于身体最宽处，最宽处在身体前部约五分之二', () => {
   for (const seed of [1, 42, 9831]) {
-    const g = art.girthOf(seed), w = x => art.halfWidth(x, g, 'kohaku');
+    const g = art.girthOf(seed), w = x => art.halfWidth(x, g);
     const xs = Array.from({ length: 641 }, (_, i) => 34 - i / 10), widest = xs.reduce((a, x) => w(x) > w(a) ? x : a, 34);
     assert.ok(widest < 12 && widest > 2, `最宽处在 x=${widest}`);
     assert.ok(w(25.8) < w(widest) * .78, '眼部（头宽）明显窄于身体最宽处');
@@ -40,27 +40,5 @@ test('纯红鱼身和尾鳍在不同随机种子下均无白斑黑斑', () => {
       }
       assert.ok(pixels > 100);
     }
-  }
-});
-test('青鲢体形比锦鲤修长，背脊深青、两侧腹缘白色', () => {
-  for (const seed of [1, 42, 9831]) {
-    const koi = art.fishLayers(0, seed, 4), carp = art.fishLayers(0, seed, 4, 'silvercarp');
-    assert.notEqual(carp, koi); assert.equal(carp.kind, 'silvercarp');
-    const widest = (kind, len, girth) => Math.max(...Array.from({length: len}, (_, i) => art.halfWidth(33 - i, girth, kind))) * 2;
-    const carpRatio = 70 / widest('silvercarp', 70, carp.girth), koiRatio = 64 / widest('kohaku', 64, koi.girth);
-    assert.ok(carpRatio > 4.3 && carpRatio > koiRatio * 1.25, `鱼身应比锦鲤明显修长（青鲢 ${carpRatio.toFixed(2)}，锦鲤 ${koiRatio.toFixed(2)}）`);
-    const sample = (x, y) => {
-      const i = Math.floor((y + core.BODY.half) * 4) * carp.W + Math.floor((x - core.BODY.left) * 4);
-      return { rgba: Array.from(carp.albedo.data.subarray(i * 4, i * 4 + 4)), shade: carp.shade[i] };
-    };
-    const back = sample(0, 0).rgba, w = art.halfWidth(0, carp.girth, 'silvercarp');
-    assert.ok(back[0] < 45 && back[1] < 90 && back[1] > back[0] * 1.5 && back[2] > back[0] * 1.5);
-    for (const side of [-1, 1]) {
-      const {rgba: flank, shade} = sample(0, side * w * .85);
-      assert.equal(flank[3], 255);
-      assert.ok(Math.min(...flank.slice(0, 3)) > 220, '白腹不能呈深灰色');
-      assert.ok(Math.min(...flank.slice(0, 3)) * shade > 195, '白腹在贴图明暗处理后仍需清晰');
-    }
-    assert.ok(sample(-33, 0).rgba[3] > 200, '细长尾柄应连到尾鳍');
   }
 });

@@ -3,7 +3,7 @@ import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
 await import('./embed.mjs');
 // Replace only the web files; dist/ also holds the macOS app, its disk image and the Android APK.
-const files=['index.html','style.css','core.js','art.js','gl.js','scene.js','audio.js','app.js','project.json','assets/pond.jpg','assets/pond-summer.jpg','assets/pond-autumn.jpg','assets/pond-winter.jpg','assets/pond-spring-thumb.jpg','assets/pond-summer-thumb.jpg','assets/pond-autumn-thumb.jpg','assets/pond-winter-thumb.jpg','assets/pond-data.js','assets/lotus-original.png','assets/favicon.svg','assets/ARTWORK.md'];
+const files=['index.html','style.css','core.js','art.js','gl.js','scene.js','audio.js','app.js','project.json','assets/pond-runtime.png','assets/pond-summer-runtime.png','assets/pond-autumn-runtime.png','assets/pond-winter-runtime.png','assets/pond-spring-thumb.jpg','assets/pond-summer-thumb.jpg','assets/pond-autumn-thumb.jpg','assets/pond-winter-thumb.jpg','assets/pond-data.js','assets/pond-bed.js','assets/lotus-original.png','assets/favicon.svg','assets/ARTWORK.md'];
 for(const file of files)await rm(`${root}dist/${file}`,{force:true});
 await mkdir(`${root}dist/assets`,{recursive:true});
 for(const file of files)await cp(`${root}${file}`,`${root}dist/${file}`);

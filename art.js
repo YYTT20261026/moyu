@@ -1,4 +1,4 @@
-// Procedural sprites: koi, fins, turtles, butterflies and small props, painted once into canvases.
+// Procedural sprites: koi, fins, turtles, butterflies, frogs and small props, painted once into canvases.
 (function (root) {
   'use strict';
   const { BODY, randomSeed, fishPalette } = root.PondCore;
@@ -27,14 +27,14 @@
   // Half the body's width seen from above, at body x (nose +34 → tail root). A koi's head is a rounded wedge,
   // clearly narrower than the body; the body swells to its widest over the pectoral fins and front of the
   // dorsal fin (about two fifths back), then tapers to a thick tail stalk.
-  function halfWidth(x, girth, kind) {
-    const silver = kind === 'silvercarp', len = silver ? 70 : 64, t = (BODY.nose - x) / len;
+  function halfWidth(x, girth) {
+    const len = 64, t = (BODY.nose - x) / len;
     if (t < 0 || t > 1) return 0;
-    const peak = silver ? .32 : .42, W = (silver ? 7.2 : 9.4) * girth;
+    const peak = .42, W = 9.4 * girth;
     const end = t > .92 ? Math.sqrt(Math.max(0, 1 - ((t - .92) / .08) ** 2)) : 1;
     // In front of the widest point the outline is a long half-ellipse: a blunt, round snout, never a point.
     if (t < peak) { const s = t / peak; return W * Math.pow(1 - (1 - s) * (1 - s), .55) * end; }
-    return W * (1 - (silver ? .74 : .62) * Math.pow((t - peak) / (1 - peak), silver ? 1.25 : 1.5)) * end;
+    return W * (1 - .62 * Math.pow((t - peak) / (1 - peak), 1.5)) * end;
   }
   const hash = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
   // Overlapping scales laid on the round back: rows follow arc length across the body, so they squeeze toward
@@ -76,28 +76,28 @@
   }
   // Heavy per-pixel layers, cached per palette/seed/resolution; marks are composited on top cheaply.
   const layerCache = new Map();
-  function fishLayers(palette, seed, ppu, species) {
-    const key = `${species || 'koi'}:${palette}:${seed}:${ppu}`;
+  function fishLayers(palette, seed, ppu) {
+    const key = `${palette}:${seed}:${ppu}`;
     if (layerCache.has(key)) return layerCache.get(key);
-    const pal = fishPalette({ palette, species }), kind = pal.kind, girth = girthOf(seed), pattern = patternFor(kind, seed), grain = valueNoise(seed + 7);
+    const pal = fishPalette({ palette }), kind = pal.kind, girth = girthOf(seed), pattern = patternFor(kind, seed), grain = valueNoise(seed + 7);
     const W = Math.round(BODY.width * ppu), H = Math.round(BODY.half * 2 * ppu), N = W * H;
     const albedo = new ImageData(W, H), shade = new Float32Array(N), spec = new Float32Array(N), fin = new ImageData(W, H);
     const base = hex(pal.base), hiC = hex(pal.spot), sumiC = hex(pal.second || pal.spot), finC = hex(pal.fin);
     // Hi is deepest in the middle of a patch and turns orange toward its edges.
     const hiDeep = hiC.map(c => c * .86), hiEdge = hiC.map((c, i) => mix(c, [238, 128, 74][i], .35));
-    const metal = kind === 'ogon', dark = kind === 'karasu', silver = kind === 'silvercarp', red = kind === 'benigoi', patterned = ['kohaku', 'sanke', 'utsuri', 'tancho'].includes(kind);
+    const metal = kind === 'ogon', dark = kind === 'karasu', red = kind === 'benigoi', patterned = ['kohaku', 'sanke', 'utsuri', 'tancho'].includes(kind);
     const P = [0, 0], Q = [0, 0], T = [0, 0], ped = [0, 0];
     pattern(-26, 0, 3, ped);
     for (let py = 0; py < H; py++) {
       const y = (py + .5) / ppu - BODY.half;
       for (let px = 0; px < W; px++) {
-        const x = (px + .5) / ppu + BODY.left, i = py * W + px, j = i * 4, w = halfWidth(x, girth, kind), ay = Math.abs(y);
+        const x = (px + .5) / ppu + BODY.left, i = py * W + px, j = i * 4, w = halfWidth(x, girth), ay = Math.abs(y);
         if (w > 0) {
           const cov = clamp01((w - ay) * ppu + .5);
           if (cov > 0) {
             const v = Math.max(-1, Math.min(1, y / w)), nz = Math.sqrt(Math.max(0, 1 - v * v)), g = .96 + .08 * fbm(grain, x * .35, y * .35, 2);
-            // Scales cover the body from behind the gill covers to the tail stalk; the silver carp's are small and fine.
-            const scaleZone = smooth(silver ? 13 : 17, silver ? 9 : 13, x) * smooth(silver ? -37 : -30, silver ? -32 : -25, x) * smooth(.99, .86, Math.abs(v)), onScale = scaleZone > 0 && scaleAt(x, y, w, silver ? .62 : 1);
+            // Scales cover the body from behind the gill covers to the tail stalk.
+            const scaleZone = smooth(17, 13, x) * smooth(-30, -25, x) * smooth(.99, .86, Math.abs(v)), onScale = scaleZone > 0 && scaleAt(x, y, w, 1);
             // Broad, soft variations in tone, so no colour is ever perfectly flat.
             const mottle = .94 + .12 * fbm(grain, x * .09 + 40, y * .14, 3);
             let c0, c1, c2, hi = 0, sumi = 0;
@@ -106,15 +106,6 @@
               const k = Math.pow(nz, 1.4);
               c0 = mix(166, 228, k); c1 = mix(104, 172, k); c2 = mix(22, 52, k);
               const head = smooth(18, 28, x) * k; c0 = mix(c0, 234, head * .3); c1 = mix(c1, 184, head * .3); c2 = mix(c2, 84, head * .3);
-            } else if (silver) {
-              // A deep blue-green dorsal stripe fades through silver into white belly edges.
-              // The belly is seen along both flanks in this overhead view.
-              // Silver carp: a broad dark blue-green-grey back (the 青 of its name) fading through bright silver
-              // to the white belly, which shows along both edges from above.
-              const flank = smooth(.22, .72, Math.abs(v)), belly = smooth(.6, .88, Math.abs(v)), head = smooth(10, 22, x) * (1 - flank) * .25;
-              c0 = mix(mix(34 - head * 12, 200, flank), 244, belly);
-              c1 = mix(mix(72 - head * 20, 212, flank), 247, belly);
-              c2 = mix(mix(70 - head * 18, 210, flank), 241, belly);
             } else {
               c0 = base[0]; c1 = base[1]; c2 = base[2];
               if (dark) { const side = smooth(.62, 1, Math.abs(v)) * .5; c0 = mix(c0, 92, side); c1 = mix(c1, 104, side); c2 = mix(c2, 100, side); }
@@ -140,8 +131,8 @@
               c0 = mix(c0, sumiC[0], sumi); c1 = mix(c1, sumiC[1], sumi); c2 = mix(c2, sumiC[2], sumi);
             }
             // Each scale carries its own slight tone, which is how scales read from a distance.
-            if (onScale) { const tone = 1 + (hash(SC.id + seed) - .5) * (metal ? .1 : red || dark ? .09 : silver ? .1 : .05) * scaleZone; c0 *= tone; c1 *= tone; c2 *= tone; }
-            const mot = silver ? mix(mottle, 1, smooth(.55, .85, Math.abs(v))) : mottle;
+            if (onScale) { const tone = 1 + (hash(SC.id + seed) - .5) * (metal ? .1 : red || dark ? .09 : .05) * scaleZone; c0 *= tone; c1 *= tone; c2 *= tone; }
+            const mot = mottle;
             c0 *= mot; c1 *= mot; c2 *= mot;
             // The visible part of every scale: its front tucks under the scale ahead and lies in that scale's shadow
             // (the pocket), a band just inside the free rear edge catches the light, and the edge itself is a fine dark line.
@@ -151,7 +142,6 @@
               const inRed = patterned ? hi : red ? 1 : 0, inBlack = dark ? 1 : patterned ? sumi : 0;
               let pd, ld, mg, tint;
               if (metal) { pd = .11; ld = .075; mg = .085; tint = [249, 216, 137]; }
-              else if (silver) { const b = 1 - smooth(.55, .85, Math.abs(v)) * .8; pd = .085 * b; ld = .08 * b; mg = .12; tint = [228, 241, 238]; }
               else if (inBlack > .5) { pd = .14; ld = -.2; mg = .15; tint = [109, 128, 121]; }
               else if (inRed > .5) { pd = .12; ld = .12; mg = .08; tint = [233, 109, 65]; }
               else { pd = .04; ld = .07; mg = .055; tint = [251, 248, 230]; }
@@ -162,18 +152,16 @@
             const along = smooth(-23, -17, x) * smooth(10, 5, x), core = smooth(.6, .1, ay) * along * .14, mem = smooth(1.7, .6, ay) * along * (.6 + .4 * Math.sin(x * 3.4)) * .07;
             c0 = mix(mix(c0, finC[0], mem), c0 * .62, core); c1 = mix(mix(c1, finC[1], mem), c1 * .64, core); c2 = mix(mix(c2, finC[2], mem), c2 * .66, core);
             albedo.data[j] = c0 * g; albedo.data[j + 1] = c1 * g; albedo.data[j + 2] = c2 * g; albedo.data[j + 3] = cov * 255;
-            let sh = (.72 + .28 * Math.pow(nz, .6)) * (1 - .18 * smooth(.72, 1, Math.abs(v)));
-            if (silver) sh = .88 + .12 * nz;
+            const sh = (.72 + .28 * Math.pow(nz, .6)) * (1 - .18 * smooth(.72, 1, Math.abs(v)));
             // A broad satin sheen sits slightly off the spine instead of a white strip down the back.
             const sheen = Math.exp(-(((v + .2) / .42) ** 2));
             let sp = metal ? .018 * Math.pow(nz, 3) + .03 * sheen : (dark ? .018 : .03) * sheen;
             if (onScale) {
-              // The light-catching band inside each free edge, stronger on the metallic and silver fish;
+              // The light-catching band inside each free edge, stronger on the metallic fish;
               // now and then a single scale is turned just so and flashes.
               const back = smooth(.1, -.5, SC.dx), band = smooth(.5, .76, SC.r) * (1 - smooth(.82, .92, SC.r)) * back * scaleZone;
-              const flash = hash(SC.id * 3.1 + seed) > (metal || silver ? .9 : .96) ? (1 - SC.r) * scaleZone : 0;
+              const flash = hash(SC.id * 3.1 + seed) > (metal ? .9 : .96) ? (1 - SC.r) * scaleZone : 0;
               if (metal) sp += band * .05 + flash * .04;
-              else if (silver) sp += band * .045 + flash * .055;
               else if (dark) sp += band * .02 + flash * .015;
               else sp += band * .025 + flash * .015;
             }
@@ -182,19 +170,19 @@
           }
         }
         // Tail fin: forked, translucent, fine rays fanning from the peduncle.
-        const tailRoot = silver ? -32 : -23;
+        const tailRoot = -23;
         if (x < tailRoot && x > -57.5) {
-          const tailU = clamp01((tailRoot - x) / (silver ? 24 : 33));
-          const span = (silver ? 1.7 : 2.9) + (silver ? 8 : 9.6) * Math.pow(Math.sin(tailU * Math.PI / 2), 1.05);
-          const lobe = ay / (silver ? 9.5 : 12.5), wob = (grain(x * .35, y * .35) - .5) * .35;
+          const tailU = clamp01((tailRoot - x) / 33);
+          const span = 2.9 + 9.6 * Math.pow(Math.sin(tailU * Math.PI / 2), 1.05);
+          const lobe = ay / 12.5, wob = (grain(x * .35, y * .35) - .5) * .35;
           // Rounded lobes and a deep fork keep the tail light, with all tips inside the existing sprite bounds.
-          const endX = (silver ? -43 : -44.6) - (silver ? 13 : 12) * smooth(.04, .8, lobe) + 3.1 * smooth(.85, 1, lobe) + wob;
+          const endX = -44.6 - 12 * smooth(.04, .8, lobe) + 3.1 * smooth(.85, 1, lobe) + wob;
           const edge = Math.min(span - ay, x - endX, tailRoot - x);
           if (edge > -.6) {
             const th = Math.atan2(y, -(x - tailRoot + 1)), ray = Math.pow(.5 + .5 * Math.cos(th * 43 + tailU * .5), 12), fold = .5 + .5 * Math.sin(th * 10 + tailU * 2);
             const rim = (1 - smooth(.2, 1.2, edge)) * smooth(.25, .6, tailU);
             const a = clamp01((edge + .6) / 1.2) * (mix(.74, .32, tailU) + ray * .095 + rim * .1 - fold * .045);
-            const base2 = clamp01(1 - ((silver ? -34 : -26) - x) / 7), pedHi = ped[0] > 0 ? 1 : 0, pedSumi = ped[1] > 0;
+            const base2 = clamp01(1 - (-26 - x) / 7), pedHi = ped[0] > 0 ? 1 : 0, pedSumi = ped[1] > 0;
             let f0 = finC[0], f1 = finC[1], f2 = finC[2];
             f0 = mix(f0, mix(base[0], hiC[0], pedHi), base2 * .8); f1 = mix(f1, mix(base[1], hiC[1], pedHi), base2 * .8); f2 = mix(f2, mix(base[2], hiC[2], pedHi), base2 * .8);
             if (pedSumi) { f0 = mix(f0, sumiC[0], base2 * .7); f1 = mix(f1, sumiC[1], base2 * .7); f2 = mix(f2, sumiC[2], base2 * .7); }
@@ -210,7 +198,7 @@
     return layers;
   }
   function fishSprite(f, ppu = 3.5, out) {
-    const L = fishLayers(f.palette, f.seed, ppu, f.species), { W, H } = L;
+    const L = fishLayers(f.palette, f.seed, ppu), { W, H } = L;
     const c = out && out.width === W && out.height === H ? out : canvas(W, H), ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.clearRect(0, 0, W, H);
     let alb = L.albedo.data;
@@ -240,7 +228,7 @@
     ctx.fillStyle = hg; ctx.fillRect(18, -9, 18, 18);
     ctx.lineCap = 'round';
     for (const s of [-1, 1]) {
-      const w1 = halfWidth(18.6, L.girth, L.kind), w2 = halfWidth(16.2, L.girth, L.kind);
+      const w1 = halfWidth(18.6, L.girth), w2 = halfWidth(16.2, L.girth);
       ctx.beginPath(); ctx.moveTo(18.8, s * w1 * .42); ctx.quadraticCurveTo(18.2, s * w1 * .85, 16.2, s * w2 * .99);
       ctx.strokeStyle = ink + '.2)'; ctx.lineWidth = .45; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(19.5, s * w1 * .48); ctx.quadraticCurveTo(18.9, s * w1 * .86, 17, s * w2 * .95);
@@ -253,11 +241,9 @@
     ctx.strokeStyle = 'rgba(246,222,187,.36)'; ctx.lineWidth = .32; ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
     for (const s of [-1, 1]) {
-      if (L.kind !== 'silvercarp') {
       ctx.beginPath(); ctx.moveTo(32.5, s * 1.9); ctx.quadraticCurveTo(33.8, s * 2.4, 34.5, s * 3.1);
       ctx.strokeStyle = dark ? 'rgba(135,153,137,.45)' : 'rgba(210,189,148,.65)'; ctx.lineWidth = .3; ctx.stroke();
-      }
-      const ex = L.kind === 'silvercarp' ? 23.8 : 25.8, ey = s * (halfWidth(ex, L.girth, L.kind) - 1.25);
+      const ex = 25.8, ey = s * (halfWidth(ex, L.girth) - 1.25);
       const ring = ctx.createRadialGradient(ex + .2, ey - .1, .05, ex, ey, 1.28);
       ring.addColorStop(0, '#182523'); ring.addColorStop(.46, '#101c1a'); ring.addColorStop(.6, L.kind === 'ogon' ? '#cead61' : dark ? '#8b9c7c' : '#b8a36a'); ring.addColorStop(.8, '#6c7457'); ring.addColorStop(1, 'rgba(51,65,50,.12)');
       ctx.beginPath(); ctx.ellipse(ex, ey, 1.28, .97, s * .2, 0, TAU); ctx.fillStyle = ring; ctx.fill();
@@ -509,6 +495,150 @@
       x.beginPath(); x.moveTo(6, 1.2); x.quadraticCurveTo(8, 2.1, 8.3, .9); x.quadraticCurveTo(7.3, 1, 6.1, .6); x.closePath(); x.fill();
       x.strokeStyle = 'rgba(30,10,4,.35)'; x.lineWidth = .22; x.beginPath(); x.ellipse(4.6, .5, 2, 1.55, -.15, 0, TAU); x.stroke();
       out.claw = { canvas: c, ppu, px: .02, py: .5 }; }
+    return out;
+  }
+
+  // ---------- Frogs ----------
+  // Painted in the same language as the koi: a rounded body shaded as a cylinder, a broad
+  // satin sheen slightly off the spine, procedural mottling and fine skin grain, translucent
+  // soft edges and a wet highlight on the eyes. Parts stay separate so the legs can paddle
+  // and the throat can swell. The face points to +x; the body spans about 31 × 17 units.
+  const FROGS = [
+    { back: '#5E8441', light: '#9CBC64', dark: '#2E4A2B', spot: '#3B5C31', fold: '#D9DEA4', belly: '#DED6A8', eye: '#D9B45C', pupil: '#1B2415', web: '#94AC66', sac: '#E7DDA4' },
+    { back: '#727B40', light: '#ADB46B', dark: '#3B4527', spot: '#4D5A31', fold: '#D2D29A', belly: '#D4CB96', eye: '#CBA64A', pupil: '#20241A', web: '#9EA767', sac: '#DED19A' }
+  ];
+  function frogSprites(v, ppu = 4) {
+    const F = FROGS[v], out = {}, n = valueNoise(911 + v * 37);
+    // Cylindrical shading from the spine out to the flanks, like the koi's albedo layer.
+    const bodyLight = (x, h) => {
+      const g = x.createLinearGradient(0, -h, 0, h);
+      g.addColorStop(0, F.dark); g.addColorStop(.22, F.back); g.addColorStop(.5, F.light); g.addColorStop(.78, F.back); g.addColorStop(1, F.dark);
+      return g;
+    };
+    // Soft irregular pigment plus fine skin grain, driven by the same noise as the koi.
+    const mottle = (x, w, h, count) => {
+      for (let i = 0; i < count; i++) {
+        const px = (hash(i * 3.17 + v * 11) - .5) * w * 2, py = (hash(i * 7.31 + v * 23) - .5) * h * 2;
+        const q = fbm(n, px * .22, py * .26, 3);
+        x.fillStyle = q > .53 ? 'rgba(28,54,30,.15)' : 'rgba(226,232,166,.09)';
+        x.beginPath(); x.ellipse(px, py, .45 + q * 1.05, .35 + q * .7, px * .09, 0, TAU); x.fill();
+      }
+      x.fillStyle = 'rgba(30,52,32,.1)';
+      for (let gx = -w; gx < w; gx += 1.2) for (let gy = -h; gy < h; gy += 1.2) {
+        x.beginPath(); x.ellipse(gx + hash(gx * 7 + gy) * .4, gy, .22, .15, 0, 0, TAU); x.fill();
+      }
+    };
+    // A wide, off-centre satin sheen and dark flanks: the koi's shade + spec pass.
+    const satin = (x, w, h) => {
+      const g = x.createLinearGradient(0, -h, 0, h);
+      g.addColorStop(0, 'rgba(8,28,16,.16)'); g.addColorStop(.28, 'rgba(255,248,208,.1)');
+      g.addColorStop(.55, 'rgba(255,248,208,.03)'); g.addColorStop(1, 'rgba(8,28,16,.2)');
+      x.fillStyle = g; x.fillRect(-w, -h, w * 2, h * 2);
+    };
+    // Body: blunt snout, broad shoulder, narrow waist and the two hip bulges.
+    {
+      const c = canvas(36 * ppu, 26 * ppu), x = c.getContext('2d');
+      x.scale(ppu, ppu); x.translate(18, 13);
+      const p = new Path2D();
+      p.moveTo(15.4, 0);
+      p.bezierCurveTo(15.4, -3.8, 13.2, -6.6, 9.2, -7.5);
+      p.bezierCurveTo(6, -8.2, 2, -8.7, -2.5, -8.4);
+      p.bezierCurveTo(-8.5, -8, -13.4, -6.2, -15, -3.1);
+      p.bezierCurveTo(-16.4, -1.2, -16.4, 1.2, -15, 3.1);
+      p.bezierCurveTo(-13.4, 6.2, -8.5, 8, -2.5, 8.4);
+      p.bezierCurveTo(2, 8.7, 6, 8.2, 9.2, 7.5);
+      p.bezierCurveTo(13.2, 6.6, 15.4, 3.8, 15.4, 0);
+      p.closePath();
+      x.fillStyle = bodyLight(x, 9); x.fill(p);
+      x.save(); x.clip(p);
+      mottle(x, 16, 8.5, 120);
+      for (const [mx, my, mr] of [[-7, -2.4, 2.1], [-1.5, 3.1, 1.7], [3, -3.4, 1.4], [-11, 1.4, 1.5], [6, 1.8, 1.1]]) {
+        x.beginPath(); x.ellipse(mx, my, mr * 1.35, mr, -.3, 0, TAU);
+        x.fillStyle = 'rgba(38,64,36,.15)'; x.fill();
+      }
+      // Dorsolateral folds from behind the eyes to the hips, a pale ridge with a dark seam.
+      for (const s of [-1, 1]) {
+        x.beginPath(); x.moveTo(8, s * 5.4); x.bezierCurveTo(2, s * 6.6, -6, s * 6.2, -13.5, s * 3.4);
+        x.strokeStyle = F.fold; x.globalAlpha = .24; x.lineWidth = .6; x.stroke();
+        x.beginPath(); x.moveTo(8, s * 5.9); x.bezierCurveTo(2, s * 7.1, -6, s * 6.8, -13.5, s * 3.9);
+        x.strokeStyle = 'rgba(30,55,30,.22)'; x.globalAlpha = 1; x.lineWidth = .35; x.stroke();
+      }
+      satin(x, 17, 9);
+      x.restore();
+      x.strokeStyle = 'rgba(28,50,28,.5)'; x.lineWidth = .4; x.stroke(p);
+      for (const s of [-1, 1]) {
+        const ex = 8.6, ey = s * 5.9;
+        x.beginPath(); x.ellipse(3.4, s * 6.7, 1.5, 1.35, 0, 0, TAU);
+        x.fillStyle = 'rgba(42,66,38,.5)'; x.fill();
+        x.strokeStyle = 'rgba(200,210,150,.24)'; x.lineWidth = .2; x.stroke();
+        const eg = x.createRadialGradient(ex + .4, ey - .5, .3, ex, ey, 3.1);
+        eg.addColorStop(0, '#f4e6a6'); eg.addColorStop(.35, F.eye); eg.addColorStop(1, '#6b6a2d');
+        x.beginPath(); x.ellipse(ex, ey, 2.7, 2.4, s * .12, 0, TAU); x.fillStyle = eg; x.fill();
+        x.strokeStyle = 'rgba(30,48,26,.65)'; x.lineWidth = .32; x.stroke();
+        x.beginPath(); x.ellipse(ex + .35, ey, 1.5, .65, s * .1, 0, TAU); x.fillStyle = F.pupil; x.fill();
+        x.beginPath(); x.arc(ex + 1.1, ey - 1, .38, 0, TAU); x.fillStyle = 'rgba(255,253,230,.9)'; x.fill();
+        x.beginPath(); x.ellipse(13.3, s * 1.8, .42, .3, 0, 0, TAU); x.fillStyle = 'rgba(28,46,28,.6)'; x.fill();
+      }
+      x.beginPath(); x.moveTo(13.6, -3.5); x.quadraticCurveTo(16.2, 0, 13.6, 3.5);
+      x.strokeStyle = 'rgba(36,55,32,.5)'; x.lineWidth = .35; x.stroke();
+      out.body = { canvas: c, ppu, px: .5, py: .5 };
+    }
+    // Folded hind leg with a webbed foot: cylindrical shading and the same fine skin grain.
+    {
+      const c = canvas(21 * ppu, 12 * ppu), x = c.getContext('2d');
+      x.scale(ppu, ppu); x.translate(1.2, 6); x.lineJoin = 'round';
+      const thigh = new Path2D();
+      thigh.moveTo(0, -2.5);
+      thigh.bezierCurveTo(3.5, -4.6, 7.5, -4.4, 9.6, -2.6);
+      thigh.bezierCurveTo(11.6, -1, 10.8, 1.2, 11.6, 2.4);
+      thigh.bezierCurveTo(8, 4.6, 3.5, 4.2, 0, 2.5);
+      thigh.closePath();
+      x.fillStyle = bodyLight(x, 4.6); x.fill(thigh);
+      x.save(); x.clip(thigh); mottle(x, 10, 4.2, 28); satin(x, 11, 5); x.restore();
+      x.strokeStyle = 'rgba(28,48,28,.48)'; x.lineWidth = .3; x.stroke(thigh);
+      const foot = new Path2D();
+      foot.moveTo(10.4, 1.2);
+      foot.quadraticCurveTo(14, -3.6, 19.2, -3.2);
+      foot.quadraticCurveTo(17, -1.4, 18.6, -.7);
+      foot.quadraticCurveTo(16.6, .5, 19.6, 1.4);
+      foot.quadraticCurveTo(17, 2.4, 18, 4.1);
+      foot.quadraticCurveTo(14.2, 4.2, 10.4, 3.1);
+      foot.closePath();
+      const fg = x.createLinearGradient(10, -3, 20, 4);
+      fg.addColorStop(0, F.back); fg.addColorStop(1, F.web);
+      x.fillStyle = fg; x.fill(foot);
+      x.strokeStyle = 'rgba(35,58,32,.5)'; x.lineWidth = .28; x.stroke(foot);
+      for (const [tx, ty] of [[19.2, -3.2], [18.6, -.7], [19.6, 1.4], [18, 4.1]]) {
+        x.beginPath(); x.moveTo(11, 2); x.quadraticCurveTo(15, (2 + ty) / 2, tx, ty);
+        x.strokeStyle = 'rgba(228,226,166,.45)'; x.lineWidth = .3; x.stroke();
+      }
+      out.hind = { canvas: c, ppu, px: 1.2 / 21, py: .5 };
+    }
+    // Short forearm with four separate toes resting on the water or the stone.
+    {
+      const c = canvas(13 * ppu, 8 * ppu), x = c.getContext('2d');
+      x.scale(ppu, ppu); x.translate(1, 4); x.lineCap = 'round';
+      x.strokeStyle = F.back; x.lineWidth = 2.6;
+      x.beginPath(); x.moveTo(0, 0); x.quadraticCurveTo(4, -1, 7.3, .5); x.stroke();
+      x.strokeStyle = 'rgba(226,230,160,.32)'; x.lineWidth = .55;
+      x.beginPath(); x.moveTo(.4, -.8); x.quadraticCurveTo(4, -1.7, 7, -.2); x.stroke();
+      for (const [tx, ty] of [[11.4, -2.5], [11.8, -.7], [11.4, 1.3], [10.2, 2.8]]) {
+        x.beginPath(); x.moveTo(7, .4); x.quadraticCurveTo(9.4, ty * .8, tx, ty);
+        x.strokeStyle = F.back; x.lineWidth = .8; x.stroke();
+        x.beginPath(); x.arc(tx, ty, .42, 0, TAU); x.fillStyle = F.web; x.fill();
+      }
+      out.front = { canvas: c, ppu, px: 1 / 13, py: .5 };
+    }
+    // Vocal sac: a soft translucent bulge that fades out rather than ending in a hard edge.
+    {
+      const c = canvas(20 * ppu, 18 * ppu), x = c.getContext('2d');
+      x.scale(ppu, ppu); x.translate(6, 9);
+      const g = x.createRadialGradient(2, -1, .8, 4, 0, 8.4);
+      g.addColorStop(0, F.sac); g.addColorStop(.6, F.belly); g.addColorStop(1, 'rgba(74,98,55,0)');
+      x.beginPath(); x.ellipse(4, 0, 7.7, 8, 0, 0, TAU); x.fillStyle = g; x.fill();
+      x.beginPath(); x.ellipse(2, -3.4, 3.2, 1.4, -.3, 0, TAU); x.fillStyle = 'rgba(255,250,215,.2)'; x.fill();
+      out.throat = { canvas: c, ppu, px: 6 / 20, py: .5 };
+    }
     return out;
   }
 
@@ -821,7 +951,8 @@
     for (let b = 0; b < BUTTERFLIES.length; b++) { const t = butterflySprites(b); s[`bf${b}_wing`] = t.wing; s[`bf${b}_body`] = t.body; }
     for (let d = 0; d < DRAGONFLIES.length; d++) { const t = dragonflySprites(d); s[`df${d}_wing`] = t.wing; s[`df${d}_body`] = t.body; }
     for (let v = 0; v < CRABS.length; v++) { const t = crabSprites(v); for (const k in t) s[`crab${v}_${k}`] = t[k]; }
+    for (let v = 0; v < FROGS.length; v++) { const t = frogSprites(v); for (const k in t) s[`frog${v}_${k}`] = t[k]; }
     return s;
   }
-  root.PondArt = { fishSprite, fishLayers, halfWidth, girthOf, miscSprites, originalLotusSprites, driftingSprites, valueNoise, TURTLE_COUNT: TURTLES.length, BUTTERFLY_COUNT: BUTTERFLIES.length, DRAGONFLY_COUNT: DRAGONFLIES.length, CRAB_COUNT: CRABS.length };
+  root.PondArt = { fishSprite, fishLayers, halfWidth, girthOf, miscSprites, originalLotusSprites, driftingSprites, valueNoise, TURTLE_COUNT: TURTLES.length, BUTTERFLY_COUNT: BUTTERFLIES.length, DRAGONFLY_COUNT: DRAGONFLIES.length, CRAB_COUNT: CRABS.length, FROG_COUNT: FROGS.length };
 })(window);

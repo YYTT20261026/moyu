@@ -1,5 +1,5 @@
 'use strict';
-const {PALETTES,KOI_SIZE,SEASONS,weatherFromCode,seasonFromMonth,clamp,createFish,createSilverCarpShoal,PondSimulation,sanitizeSave,randomSeed,koiAge}=PondCore;
+const {PALETTES,KOI_SIZE,SEASONS,POND_MAP,weatherFromCode,seasonFromMonth,clamp,createFish,PondSimulation,sanitizeSave,randomSeed,koiAge}=PondCore;
 const $=s=>document.querySelector(s);
 // A koi's temperament, shown next to its name on the appetite board (see TEMPER_TRAITS in core.js).
 const TEMPER_LABEL={greedy:'贪',timid:'怯',loner:'独',tame:'亲'};
@@ -27,10 +27,10 @@ const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={season:'spring',weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,chat:false,quality:'high',autoWeather:false,location:null,night:false,feedMode:true,...PondAudio.NATURE_DEFAULTS,rainAmount:.5,snowAmount:.5,soundOn:false,cardCollapsed:false};
+const defaults={season:'spring',weather:'sunny',speed:1,turtles:true,crabs:true,butterflies:true,names:false,chat:false,quality:'high',autoWeather:false,location:null,night:false,feedMode:true,...PondAudio.NATURE_DEFAULTS,rainAmount:.5,snowAmount:.5,soundOn:false,cardCollapsed:false};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
-function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','chat','autoWeather','night','feedMode','sfx','water','weatherSound','soundOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
+function readSettings(src){for(const key of ['turtles','crabs','butterflies','names','chat','autoWeather','night','feedMode','sfx','water','weatherSound','soundOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
   if(typeof src.cardCollapsed==='boolean')settings.cardCollapsed=src.cardCollapsed;
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
@@ -72,7 +72,7 @@ let daily=saved?.daily?.date===dayKey()?{date:dayKey(),count:clamp(Number(saved.
 const fish=saved?.fish||Array.from({length:24},(_,i)=>({...createFish(i,randomSeed(i*7+3)),id:`koi-${i+1}`}));
 const sound=new PondAudio.PondAudio();sound.configure(settings);
 let canvas=$('#world');const labels=$('#labels'),labelCtx=labels.getContext('2d');
-const simulation=new PondSimulation(fish,innerWidth,innerHeight,Math.random,createSilverCarpShoal(),settings.silverCarp);
+const simulation=new PondSimulation(fish,innerWidth,innerHeight,Math.random);
 let width=innerWidth,height=innerHeight,dpr=1,feedMode=settings.feedMode,zen=false,paused=false,activePanel='',last=0,time=0,lastFrame=0,hostFps=60;
 let previewFish=null,previewCanvas=null,previewSprite=null,previewKey='',weatherData=null,toastTimer=0,persistTimer=0,weatherRequest=0,citySearchController=null,compareWith=null;
 let renderer=null,scene=null,bedImage=null;const sprites=PondArt.miscSprites(),spriteCache=new Map(),PREVIEW_K=4.6;
@@ -145,7 +145,7 @@ function applyExternalSave(raw){let data;try{data=JSON.parse(raw);}catch{return;
     const next=s.fish.map(src=>{const f=byId.get(src.id);if(!f)return src;const look=f.palette!==src.palette||f.seed!==src.seed||f.size!==src.size||marksHash(f.marks)!==marksHash(src.marks);
       Object.assign(f,{name:src.name,palette:src.palette,size:src.size,baseSize:src.baseSize,growthBase:src.growthBase||0,seed:src.seed,marks:src.marks,eaten:Math.max(f.eaten,src.eaten)});if(look)f.spriteReady=false;return f;});
     for(const f of simulation.fish)if(!next.includes(f)&&scene){scene.drop(f.x*width,f.y*height,12*scene.scale,.8);scene.wakes.delete(f);}
-    simulation.fish.splice(0,simulation.fish.length,...next);simulation.residentsOn=settings.silverCarp;simulation.allFish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
+    simulation.fish.splice(0,simulation.fish.length,...next);simulation.fish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
     if(settings.quality!==quality)resize();applyWeather();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
   }else for(const src of s.fish){const f=byId.get(src.id);if(f)f.eaten=Math.max(f.eaten,src.eaten);}
   editSig=editSignature();updateMeta();}
@@ -176,9 +176,9 @@ function resize(){
 addEventListener('resize',resize);resize();
 // Sprites are keyed by what they depict; pond fish never change after creation, the preview does.
 function marksHash(marks){let h=marks?marks.length:0;if(marks)for(const m of marks)h=(h*31+Math.round(m.x*10)*7+Math.round(m.y*10)*13+m.r*17+parseInt(m.color.slice(1),16))|0;return h;}
-const spriteKey=f=>`${f.species||'koi'}:${f.palette}:${f.seed}:${marksHash(f.marks)}`;
+const spriteKey=f=>`${f.palette}:${f.seed}:${marksHash(f.marks)}`;
 function fishCanvas(f){const key=spriteKey(f);let c=spriteCache.get(key);if(!c){c=PondArt.fishSprite(f,PondGL.FISH_PPU);spriteCache.set(key,c);if(spriteCache.size>120)spriteCache.delete(spriteCache.keys().next().value);}return c;}
-function uploadSprites(){if(!renderer)return;simulation.allFish.forEach((f,i)=>{if(!f.spriteReady||f.spriteCell!==i){renderer.setFish(i,fishCanvas(f));f.spriteReady=true;f.spriteCell=i;}});}
+function uploadSprites(){if(!renderer)return;simulation.fish.forEach((f,i)=>{if(!f.spriteReady||f.spriteCell!==i){renderer.setFish(i,fishCanvas(f));f.spriteReady=true;f.spriteCell=i;}});}
 // A few gestures share the water: a tap feeds (or ripples), holding still scatters a handful, dragging a hand
 // across the surface leaves a wake and nudges the koi aside, and a right click frightens them off.
 function bindCanvas(){
@@ -259,14 +259,15 @@ function scareBurst(x,y){
 }
 bindCanvas();
 function createPond(){
-  renderer=PondGL.createRenderer(canvas,bedImage,sprites,()=>{renderer=null;createPond();},backgroundMask(backgroundSeason,bedImage));
+  // 底图可以是 8K，但岸线、荷叶、鱼食和锦鲤都标注在 POND_MAP 的 2560×1440 设计尺度上。
+  renderer=PondGL.createRenderer(canvas,bedImage,sprites,()=>{renderer=null;createPond();},backgroundMask(backgroundSeason,bedImage),{width:POND_MAP.width,height:POND_MAP.height});
   if(!renderer){toast('当前浏览器无法绘制池塘');return;}
   if(renderer.canvas!==canvas){canvas=renderer.canvas;bindCanvas();}
   document.body.classList.toggle('gl',renderer.kind==='webgl2');
   if(scene)scene.R=renderer;else scene=new PondScene.PondScene(renderer,simulation);
   scene.setSeason(backgroundSeason);
   resize();scene.update(0,settings);scene.setLook(settings.weather,settings.night,undefined,settings,twilightNightK());
-  simulation.allFish.forEach(f=>f.spriteReady=false);uploadSprites();
+  simulation.fish.forEach(f=>f.spriteReady=false);uploadSprites();
   warmBackgrounds();
 }
 function drawLabels(){
@@ -275,7 +276,7 @@ function drawLabels(){
   labels.dataset.on='1';labelCtx.setTransform(dpr,0,0,dpr,0,0);labelCtx.clearRect(0,0,width,height);
   if(settings.names){
     labelCtx.font='11px "PingFang SC","Microsoft YaHei",sans-serif';labelCtx.textAlign='center';labelCtx.textBaseline='alphabetic';labelCtx.lineJoin='round';labelCtx.lineWidth=3;labelCtx.strokeStyle='rgba(34,52,45,.55)';labelCtx.fillStyle='#fbf9ec';
-    for(const f of simulation.allFish){const x=f.x*width,y=f.y*height-16*f.size*simulation.scale;labelCtx.strokeText(f.name,x,y);labelCtx.fillText(f.name,x,y);}
+    for(const f of simulation.fish){const x=f.x*width,y=f.y*height-16*f.size*simulation.scale;labelCtx.strokeText(f.name,x,y);labelCtx.fillText(f.name,x,y);}
   }
   if(chats)drawChats(chats);
 }
@@ -384,11 +385,11 @@ async function start(){
   lotusArtworkReady=true;await syncSeason();ensureFrame();
 }
 start();
-function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤${settings.silverCarp?` · ${simulation.residents.length} 尾青鲢`:''}`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;}
+function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;}
 // The koi whose body is under the finger, if any: a tap on her is a fright, not a pellet of food.
 function fishAt(x,y){
   let best=null,bd=Infinity;
-  for(const f of simulation.allFish){
+  for(const f of simulation.fish){
     const s=(f.size||.8)*simulation.scale,d=Math.hypot(f.x*width-x,f.y*height-y);
     if(d<40*s&&d<bd){bd=d;best=f;}
   }
@@ -400,7 +401,7 @@ function feedAt(x,y){
   // snow off, or scatters fireflies instead of feeding the koi.
   if(scene.touchSeasons(x,y)){if(sound.active)sound.tap();return;}
   if(lanternAt(x,y))return;
-  // Pull the pellet a little way in from the bank. Dropped right on the water line, the shoal has to press
+  // Pull the pellet a little way in from the bank. Dropped right on the water line, the koi have to press
   // into the shore to reach it, and every frame the boundary shoves them back — which reads as trembling.
   if(simulation.habitat){
     const p=simulation.habitat.project(x,y,26*scene.scale);
@@ -474,7 +475,7 @@ $('#card-toggle').addEventListener('click',()=>{setCardCollapsed(!cardFolded);pe
 setCardCollapsed(settings.cardCollapsed);
 $('#feed-button')?.addEventListener('click',()=>{setFeedMode(!feedMode);persist();toast(feedMode?'投喂已开启，轻点水面试试':'观鱼模式 · 轻点水面，鱼儿会受惊游开');});
 function applyWeather(syncBackground=true){updatePondHint();document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};$('#weather-symbol').innerHTML=icon(settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);if(syncBackground)syncSeason();syncShelters();}
-// Rain sends the shoal under the lotus leaves; any other weather lets it wander again.
+// Rain sends the fish under the lotus leaves; any other weather lets them wander again.
 function syncShelters(){if(!scene)return;simulation.setShelters(settings.weather==='rain'?scene.shelterPoints():null);}
 function rainLabel(){return settings.rainAmount<.34?'小雨':settings.rainAmount<.67?'中雨':'大雨';}
 function snowLabel(){return settings.snowAmount<.34?'小雪':settings.snowAmount<.67?'中雪':'大雪';}
@@ -490,7 +491,7 @@ dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoun
 dialog.addEventListener('close',()=>{activePanel='';previewCanvas=null;previewFish=null;compareWith=null;citySearchController?.abort();$('#panel-toast')?.classList.remove('visible');armCardIdle();});
 function openPanel(type){activePanel=type;previewCanvas=null;previewFish=null;const names={fish:['我的锦鲤','MEET YOUR LITTLE FRIENDS'],weather:['池塘天气','EVERY WEATHER HAS ITS POETRY'],settings:['池塘设置','MAKE YOURSELF AT HOME']};$('#panel-title').textContent=names[type][0];$('#panel-eyebrow').textContent=names[type][1];if(!dialog.open){if(panelMode)dialog.show();else dialog.showModal();}({fish:renderFish,weather:renderWeather,settings:renderSettings})[type]();if(type==='fish')ensureFrame();}
 function thumbnail(f,width=120,height=60){const c=document.createElement('canvas');c.width=width*2;c.height=height*2;c.style.width=`${width}px`;c.style.height=`${height}px`;const context=c.getContext('2d');context.scale(2,2);const s=Math.min(f.size*.95,width*.86/96);PondScene.drawKoi2D(context,{...f,phase:1},fishCanvas(f),sprites,width*.5+12*s,height*.5-1.4*s,-.12,s,.35);return c;}
-function renderFish(){const content=$('#panel-content');content.innerHTML=`<p class="description">为你的池塘添一尾锦鲤。选一种花色，取一个好名字。</p><div class="fish-preview"><canvas id="preview" width="880" height="290" aria-label="锦鲤外观预览"></canvas><span class="preview-label">一鱼一色 · 各有欢喜</span><span class="preview-temper" id="preview-temper"></span></div><div class="form-row"><label>锦鲤花色</label><div class="palette">${PALETTES.map((p,i)=>`<button type="button" class="swatch ${i===0?'selected':''}" style="background:${p.spot}" data-palette="${i}" aria-label="${p.name}" aria-pressed="${i===0}"></button>`).join('')}</div><span id="palette-name" class="small-note">红白</span></div><div class="form-row"><label for="fish-size">锦鲤大小</label><input id="fish-size" type="range" min="${KOI_SIZE.min}" max="${KOI_SIZE.max}" step="0.05" value="${KOI_SIZE.initial}"/><button id="new-pattern" class="edit-fish">换个花纹 ↻</button></div><p class="small-note">默认展示为最大尺寸，可向左调小。</p><div class="form-row paint-tools"><label for="paint-toggle">手绘花纹</label><input id="paint-toggle" type="checkbox" aria-label="手绘花纹"/><span class="small-note">开启后在鱼身涂画</span><input id="paint-color" type="color" value="#bc5036" aria-label="画笔颜色"/><button id="clear-paint" type="button" class="edit-fish">清除</button></div><form id="add-fish-form"><div class="form-row"><label for="fish-name">给它起名</label><input id="fish-name" type="text" maxlength="12" placeholder="例如：小满、如意、听雨" autocomplete="off"/></div><div class="form-actions"><span class="small-note">它会记住你投下的每一粒鱼食</span><button class="primary" type="submit">放入池塘 ＋</button></div></form><div class="collection-head"><h3>我的小伙伴 <span id="collection-count" class="small-note"></span></h3><button class="edit-fish" id="restore-all" title="锦鲤回到刚来时的体型，青鲢回到原来的六成">全部还原体型</button></div><p class="temper-legend"><span><b>贪</b>贪吃 · 总第一个冲到食</span><span><b>怯</b>胆小 · 一点动静就躲开</span><span><b>独</b>独行 · 喜欢自己待着</span><span><b>亲</b>亲人 · 爱凑在鱼群里</span></p><div class="fish-grid" id="fish-grid"></div><div class="collection-foot"><span class="small-note" id="week-eaten"></span><button class="edit-fish" id="open-memorial">曾经的伙伴</button></div>`;
+function renderFish(){const content=$('#panel-content');content.innerHTML=`<p class="description">为你的池塘添一尾锦鲤。选一种花色，取一个好名字。</p><div class="fish-preview"><canvas id="preview" width="880" height="290" aria-label="锦鲤外观预览"></canvas><span class="preview-label">一鱼一色 · 各有欢喜</span><span class="preview-temper" id="preview-temper"></span></div><div class="form-row"><label>锦鲤花色</label><div class="palette">${PALETTES.map((p,i)=>`<button type="button" class="swatch ${i===0?'selected':''}" style="background:${p.spot}" data-palette="${i}" aria-label="${p.name}" aria-pressed="${i===0}"></button>`).join('')}</div><span id="palette-name" class="small-note">红白</span></div><div class="form-row"><label for="fish-size">锦鲤大小</label><input id="fish-size" type="range" min="${KOI_SIZE.min}" max="${KOI_SIZE.max}" step="0.05" value="${KOI_SIZE.initial}"/><button id="new-pattern" class="edit-fish">换个花纹 ↻</button></div><p class="small-note">默认展示为最大尺寸，可向左调小。</p><div class="form-row paint-tools"><label for="paint-toggle">手绘花纹</label><input id="paint-toggle" type="checkbox" aria-label="手绘花纹"/><span class="small-note">开启后在鱼身涂画</span><input id="paint-color" type="color" value="#bc5036" aria-label="画笔颜色"/><button id="clear-paint" type="button" class="edit-fish">清除</button></div><form id="add-fish-form"><div class="form-row"><label for="fish-name">给它起名</label><input id="fish-name" type="text" maxlength="12" placeholder="例如：小满、如意、听雨" autocomplete="off"/></div><div class="form-actions"><span class="small-note">它会记住你投下的每一粒鱼食</span><button class="primary" type="submit">放入池塘 ＋</button></div></form><div class="collection-head"><h3>我的小伙伴 <span id="collection-count" class="small-note"></span></h3><button class="edit-fish" id="restore-all" title="锦鲤回到刚来时的体型">全部还原体型</button></div><p class="temper-legend"><span><b>贪</b>贪吃 · 总第一个冲到食</span><span><b>怯</b>胆小 · 一点动静就躲开</span><span><b>独</b>独行 · 喜欢自己待着</span><span><b>亲</b>亲人 · 爱凑在鱼群里</span></p><div class="fish-grid" id="fish-grid"></div><div class="collection-foot"><span class="small-note" id="week-eaten"></span><button class="edit-fish" id="open-memorial">曾经的伙伴</button></div>`;
   previewFish={...createFish(0),temper:createFish(simulation.fish.length).temper,palette:0,angle:0,size:KOI_SIZE.initial,marks:[]};previewCanvas=$('#preview');
   content.querySelectorAll('[data-palette]').forEach(b=>b.addEventListener('click',()=>{previewFish.palette=Number(b.dataset.palette);content.querySelectorAll('[data-palette]').forEach(s=>{s.classList.toggle('selected',s===b);s.setAttribute('aria-pressed',s===b);});$('#palette-name').textContent=PALETTES[previewFish.palette].name;}));
   let painting=false;
@@ -500,15 +501,14 @@ function renderFish(){const content=$('#panel-content');content.innerHTML=`<p cl
   previewCanvas.addEventListener('pointerdown',e=>{painting=true;previewCanvas.setPointerCapture(e.pointerId);brush(e);});previewCanvas.addEventListener('pointermove',brush);previewCanvas.addEventListener('pointerup',()=>painting=false);previewCanvas.addEventListener('pointercancel',()=>painting=false);
   $('#fish-size').addEventListener('input',e=>previewFish.size=clamp(Number(e.target.value),KOI_SIZE.min,KOI_SIZE.max));$('#new-pattern').addEventListener('click',()=>previewFish.seed=Math.floor(Math.random()*100000));
   $('#open-memorial')?.addEventListener('click',()=>renderMemorial());
-  // One click restores every koi and the silver carp shoal to their arrival build. The reset only
-  // changes the body size; meal records stay, so there is nothing destructive to confirm.
+  // One click restores every koi to her arrival build. The reset only changes the body size;
+  // meal records stay, so there is nothing destructive to confirm.
   $('#restore-all')?.addEventListener('click',()=>{
-    const residents=simulation.residents||[],off=f=>Math.abs(f.size-restoreTarget(f))>.005,grown=simulation.fish.filter(off);
-    if(!grown.length&&!residents.some(off))return toast('所有鱼都已回到还原后的体型');
+    const off=f=>Math.abs(f.size-restoreTarget(f))>.005,grown=simulation.fish.filter(off);
+    if(!grown.length)return toast('所有鱼都已回到还原后的体型');
     for(const f of grown)restoreBuild(f);
-    for(const f of residents)restoreBuild(f);
     persist();renderCollection();
-    toast(`已还原 ${grown.length} 尾锦鲤${residents.length?`、${residents.length} 尾青鲢（原来的六成）`:''}的体型，吃食记录都还在`);
+    toast(`已还原 ${grown.length} 尾锦鲤的体型，吃食记录都还在`);
   });
   $('#add-fish-form').addEventListener('submit',e=>{e.preventDefault();if(simulation.fish.length>=60)return toast('池塘最多容纳 60 尾锦鲤');const f={...createFish(simulation.fish.length),palette:previewFish.palette,size:clamp(previewFish.size,KOI_SIZE.min,KOI_SIZE.max),seed:previewFish.seed,marks:previewFish.marks.map(m=>({...m}))};f.name=$('#fish-name').value.trim().slice(0,12)||f.name;simulation.fish.push(f);simulation.confineFish(f);uploadSprites();$('#fish-name').value='';updateMeta();persist();renderCollection();toast(`${f.name} 已游入池塘`);});renderCollection();}
 // The preview shows the koi that is about to be added, so it also names the temperament she will get.
@@ -566,9 +566,9 @@ function renderFishDetail(f){
   });
   $('#profile-release').addEventListener('click',()=>{if(simulation.fish.length<=1)return toast('池塘里至少留一尾锦鲤');releaseFish(f);});
 }
-// A koi goes back to the build it arrived with; a silver carp is restored to 60% of its arrival build.
+// A koi goes back to the build she arrived with.
 // Meals already eaten stay on record, so a koi grows again only with what it eats from now on.
-function restoreTarget(f){return f.species==='silvercarp'?f.baseSize*.6:f.baseSize;}
+function restoreTarget(f){return f.baseSize;}
 function restoreBuild(f){f.size=restoreTarget(f);f.growthBase=f.eaten;}
 // Two koi side by side: colour, temperament, appetite, build, age.
 function renderCompare(a,b){
@@ -605,7 +605,7 @@ function updateWeatherInfo(){const box=$('#weather-info');if(!box)return;if(sett
 async function searchCity(e){e.preventDefault();const query=$('#city-input').value.trim();if(!query)return;const results=$('#city-results'),button=$('#city-form button');citySearchController?.abort();const controller=new AbortController();citySearchController=controller;const timeout=setTimeout(()=>controller.abort(),12000);button.disabled=true;button.textContent='查询中';results.textContent='正在寻找城市…';try{const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal});if(!response.ok)throw Error('network');const data=await response.json();if(!results.isConnected)return;results.replaceChildren();if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}for(const place of data.results){const b=document.createElement('button');b.className='city-result';b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;sunTimes=null;autoNightState=null;persist();applyWeather();renderWeather();fetchWeather();});results.append(b);}}catch{if(results.isConnected)results.textContent='城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';}finally{clearTimeout(timeout);if(button.isConnected){button.disabled=false;button.textContent='查询';}}}
 async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&daily=sunrise,sunset&forecast_days=2&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code)||!data.current?.time)throw Error('data');const offset=(Number(data.utc_offset_seconds)||0)*1000,toTime=s=>{const t=Date.parse(s+'Z');return Number.isFinite(t)?t-offset:null;},rises=(data.daily?.sunrise||[]).map(toTime).filter(Number.isFinite),sets=(data.daily?.sunset||[]).map(toTime).filter(Number.isFinite);sunTimes=rises.length&&sets.length?{rise:rises[0],set:sets[0],nextRise:rises[1]??null,label:{rise:(data.daily?.sunrise?.[0]||'').slice(11,16),set:(data.daily?.sunset?.[0]||'').slice(11,16)}}:null;weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);const localTime=new Date(weatherData.time),season=seasonFromMonth(localTime.getMonth(),location.latitude<0);if(Object.hasOwn(SEASONS,season)&&settings.season!==season){settings.season=season;settings.weather=SEASONS[season].weather;}if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);syncAutoNight();applyWeather();persist();if(activePanel==='weather')renderWeather();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';if(activePanel==='weather'&&$('#weather-info'))$('#weather-info').textContent='天气服务暂时无法连接，已保留当前池塘天气，可稍后重试。';toast('实时天气暂不可用，已保留当前天气');}}
 setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
-function renderSettings(){$('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['silverCarp','青鲢鱼','银鳞结伴，穿梭于锦鲤之间'],['butterflies','蝴蝶与蜻蜓','春夏秋随季节出现，冬季隐藏；夏夜萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友'],['chat','好友对话','两尾常在一处的鱼靠近时，会小声聊上一句']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>声音</h3><div class="setting-row"><div>总音量<small>卡片顶部的声音图标可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>${[['water','waterVol','池水轻漾','轻柔池水作背景，音量可以单独调整'],['weatherSound','weatherVol','四季环境音','春听鸟鸣，夏听蝉蛙，秋听叶响，冬听轻风；雨雪随天气变化']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}`;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;if(input.dataset.setting==='silverCarp'){simulation.residentsOn=settings.silverCarp;simulation.residents.forEach(f=>f.spriteReady=false);uploadSprites();updateMeta();}persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击右上角声音按钮即可试听');};document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});}
+function renderSettings(){$('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['butterflies','蝴蝶与蜻蜓','春夏秋随季节出现，冬季隐藏；夏夜萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友'],['chat','好友对话','两尾常在一处的鱼靠近时，会小声聊上一句']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>声音</h3><div class="setting-row"><div>总音量<small>卡片顶部的声音图标可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>${[['water','waterVol','池水轻漾','轻柔池水作背景，音量可以单独调整'],['weatherSound','weatherVol','四季环境音','春听鸟鸣，夏听蝉鸣，秋听叶响，冬听轻风；雨雪随天气变化']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}`;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击右上角声音按钮即可试听');};document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});}
 function setZen(value){zen=value;document.body.classList.toggle('zen',zen);document.querySelectorAll('.ui').forEach(el=>el.inert=zen);$('#exit-zen').hidden=!zen;$('#zen-button')?.setAttribute('aria-label',zen?'退出沉浸模式':'进入沉浸模式');armCardIdle();}
 $('#zen-button').addEventListener('click',()=>setZen(true));
 // Esc leaves the immersive view here too. On the desktop wallpaper the page has no keyboard focus, so the

@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const core=require('../core.js');
 
-function renderer(kind='webgl2'){
+function renderer(kind='webgl2',bed,design){
   const calls=[],constants=new Map();let id=0;
   const gl=new Proxy({}, {get(_,name){
     if(typeof name==='string'&&name===name.toUpperCase()){
@@ -21,8 +21,8 @@ function renderer(kind='webgl2'){
   const canvas={width:1,height:1,addEventListener(){},getContext(type){return type==='webgl2'?(kind==='webgl2'?gl:null):{};}};
   const context={window:{PondCore:core},console};
   vm.runInNewContext(fs.readFileSync(require.resolve('../gl.js'),'utf8'),context);
-  const image={width:2560,height:1440},mask={width:1280,height:720};
-  const r=context.window.PondGL.createRenderer(canvas,image,{},null,mask);
+  const image=bed||{width:2560,height:1440},mask={width:image.width/2,height:image.height/2};
+  const r=context.window.PondGL.createRenderer(canvas,image,{},null,mask,design);
   assert.equal(r.kind,kind);
   return {r,calls,image,mask,canvas};
 }
@@ -69,6 +69,36 @@ test('阴雨雪切回晴天清空已有云影贴图，晴天不生成云影，�
     }
     calls.length=0;r.render(3,1/60,env('cloudy',night));
     assert.ok(calls.some(c=>c[0]==='uniform1f'&&c[1]==='uCover'&&c[2]>0),'切回多云恢复动态云影');
+  }
+});
+
+for(const kind of ['webgl2','2d'])test(`${kind}：8K 底图仍按 2560×1440 标注尺度映射，切换底图不移动荷叶与鱼`,()=>{
+  const small=renderer(kind);small.r.resize(1280,720,1,'high');
+  const big=renderer(kind,{width:7680,height:4320},{width:2560,height:1440});big.r.resize(1280,720,1,'high');
+  for(const [x,y] of [[0,0],[110,365],[690,930],[2560,1440]])assert.deepEqual(
+    Array.from(big.r.imageToScreen(x,y)),Array.from(small.r.imageToScreen(x,y)),'8K 底图与设计尺度的屏幕位置一致'
+  );
+  big.r.setBackground({width:7680,height:4320},{width:2560,height:1440});
+  for(const [x,y] of [[0,0],[110,365],[2560,1440]])assert.deepEqual(
+    Array.from(big.r.imageToScreen(x,y)),Array.from(small.r.imageToScreen(x,y)),'换底图后无需 resize'
+  );
+});
+
+test('8K 底图切换四季：荷叶、鱼食与锦鲤都留在鱼塘水域',()=>{
+  const {r}=renderer('webgl2',{width:7680,height:4320},{width:2560,height:1440});r.resize(1280,720,1,'high');
+  const context={window:{PondCore:core},ImageData:class{constructor(w,h){this.width=w;this.height=h;this.data=new Uint8ClampedArray(w*h*4);}}};
+  for(const file of ['art.js','scene.js'])vm.runInNewContext(fs.readFileSync(require.resolve(`../${file}`),'utf8'),context);
+  const random=core.randomSeed(41),fish=Array.from({length:8},(_,i)=>core.createFish(i,random));
+  const sim=new core.PondSimulation(fish,1280,720,random);
+  const scene=new context.window.PondScene.PondScene(r,sim);
+  for(const season of ['summer','autumn','winter','spring']){
+    r.setBackground({width:7680,height:4320},{width:2560,height:1440});
+    scene.setSeason(season);scene.layout(1280,720);
+    assert.ok(scene.lotusPlants.length>0,`${season} 有荷叶`);
+    for(const p of scene.lotusPlants)assert.ok(sim.isWater(p.x,p.y,p.r),`${season} 荷叶完整轮廓留在水面`);
+    for(const f of sim.fish)assert.ok(sim.isWater(f.x*1280,f.y*720,sim.fishMargin(f)),`${season} 锦鲤留在水面`);
+    const feed=sim.habitat.project(640,360,5);
+    assert.ok(feed&&sim.isWater(...feed,4),`${season} 池心可投喂`);
   }
 });
 

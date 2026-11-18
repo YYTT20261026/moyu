@@ -32,7 +32,7 @@ plutil -lint -s "$CONTENTS/Info.plist"
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do
   cp "$ROOT/$f" "$CONTENTS/Resources/$f"
 done
-cp "$ROOT"/assets/pond*.jpg "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/drifting-flora.png" "$ROOT/assets/drifting-flora.json" "$ROOT/assets/favicon.svg" "$CONTENTS/Resources/assets/"
+cp "$ROOT"/assets/pond*runtime.png "$ROOT/assets/pond-data.js" "$ROOT/assets/pond-bed.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/drifting-flora.png" "$ROOT/assets/drifting-flora.json" "$ROOT/assets/favicon.svg" "$CONTENTS/Resources/assets/"
 cp -R "$ROOT/assets/audio" "$CONTENTS/Resources/assets/"
 
 echo "▸ Generating app icon…"
