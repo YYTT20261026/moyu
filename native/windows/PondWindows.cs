@@ -36,7 +36,7 @@ namespace BichiPond
         /// "corner" keeps its corner card on the desktop. <paramref name="panel"/> opens that panel directly (the
         /// interactive window, reached from the wallpaper's card). <paramref name="safe"/> is the screen's work-area
         /// inset as top/right/bottom/left in CSS px, keeping the card clear of a taskbar docked at a side.</summary>
-        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave, string panel = null, int[] safe = null, bool waitForPanel = false, bool waitForLoad = false)
+        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave, string panel = null, int[] safe = null, bool waitForPanel = false, bool waitForLoad = false, Action<WebView2, CoreWebView2ProcessFailedKind> onProcessFailed = null)
         {
             var view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = mode == "panel" ? Paper : Backdrop };
             parent.Controls.Add(view);
@@ -58,7 +58,13 @@ namespace BichiPond
                 e.Cancel = true; OpenInBrowser(e.Uri);
             };
             // If the page's renderer dies (GPU reset, low memory), load the pond again rather than leave a blank desktop.
-            core.ProcessFailed += (s, e) => { try { core.Reload(); } catch (Exception) { } };
+            // A browser process killed from outside (an Edge-family installer stops every msedgewebview2 to replace the
+            // runtime) cannot be reloaded at all — it needs a fresh view, which the host rebuilds (see PondApp.OnProcessFailed).
+            core.ProcessFailed += (s, e) =>
+            {
+                if (onProcessFailed != null) onProcessFailed(view, e.ProcessFailedKind);
+                else try { core.Reload(); } catch (Exception) { }
+            };
             if (safe != null)
             {
                 // The card clears a taskbar docked at the top or a side through the page's safe-area variables.
@@ -154,7 +160,7 @@ namespace BichiPond
         // Never take focus from whatever the person is using.
         protected override bool ShowWithoutActivation => true;
 
-        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave)
+        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave, Action<WebView2, CoreWebView2ProcessFailedKind> onProcessFailed = null)
         {
             CreateHandle();
             // Once inside the desktop the window's position is relative to its new parent; keep WinForms in agreement.
@@ -172,7 +178,7 @@ namespace BichiPond
                 Math.Max(0, (int)Math.Round((bounds.Bottom - work.Bottom) / k)),
                 Math.Max(0, (int)Math.Round((work.Left - bounds.Left) / k)),
             };
-            View = await PondPage.Create(this, env, "corner", onSave, null, safe);
+            View = await PondPage.Create(this, env, "corner", onSave, null, safe, onProcessFailed: onProcessFailed);
         }
 
         /// <summary>Notes that nobody can see this screen for now. The view is deliberately left visible: hiding
@@ -222,10 +228,10 @@ namespace BichiPond
             MinimumSize = new Size(LogicalToDeviceUnits(440), LogicalToDeviceUnits(600));
         }
 
-        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave, string panel = null)
+        public async Task Start(CoreWebView2Environment env, Action<WebView2, string> onSave, string panel = null, Action<WebView2, CoreWebView2ProcessFailedKind> onProcessFailed = null)
         {
             Show();
-            View = await PondPage.Create(this, env, null, onSave, panel);
+            View = await PondPage.Create(this, env, null, onSave, panel, onProcessFailed: onProcessFailed);
         }
     }
 }

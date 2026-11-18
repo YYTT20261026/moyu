@@ -33,7 +33,7 @@ namespace BichiPond
         private CoreWebView2Environment env;
         private InteractiveForm window;
         private PanelForm panelWindow;
-        private bool userPaused, locked, rebuilding, quitting, soundOn;
+        private bool userPaused, locked, rebuilding, quitting, soundOn, opening;
         private string screenSignature = "";
         private string season = "spring";
         private string weather = "sunny";
@@ -57,7 +57,11 @@ namespace BichiPond
             shell = new ShellWatcher(() => Rebuild(1500));
             hold.Tick += HoldTick;
             BuildTray();
-            watch.Tick += (s, e) => UpdateVisibility();
+            watch.Tick += (s, e) =>
+            {
+                if (AnyWallpaperLost()) { Rebuild(200); return; }
+                UpdateVisibility();
+            };
             SystemEvents.DisplaySettingsChanged += (s, e) => Rebuild(800);
             SystemEvents.SessionSwitch += (s, e) =>
             {
@@ -115,7 +119,7 @@ namespace BichiPond
             {
                 var wall = new WallpaperForm(m.Item1, m.Item2, m.Item3);
                 walls.Add(wall);
-                await wall.Start(env, OnSave);
+                await wall.Start(env, OnSave, OnProcessFailed);
             }
             UpdateVisibility();
         }
@@ -129,6 +133,34 @@ namespace BichiPond
             try { await BuildWallpapers(); }
             catch (Exception ex) { Report("桌面壁纸重建失败", ex); }
             finally { rebuilding = false; }
+        }
+
+        // A WebView2 process went away. A renderer that crashed (GPU reset, out of memory) can be reloaded in place, but a
+        // browser process terminated from outside cannot: something else killed it and there is nothing left to reload.
+        // Installing or uninstalling any Edge-family product does exactly that — its installer replaces the WebView2
+        // runtime and stops every msedgewebview2 process to release the DLL locks, so the pond would vanish silently and
+        // never come back. Rebuilding every screen covers both kinds, and any number of lost views at once.
+        private void OnProcessFailed(WebView2 view, CoreWebView2ProcessFailedKind kind)
+        {
+            Note($"WebView2 进程失败：{kind}");
+            if (kind != CoreWebView2ProcessFailedKind.BrowserProcessExited)
+            {
+                try { view.Reload(); } catch (Exception) { }
+                return;
+            }
+            Rebuild(200);
+        }
+
+        // Nothing fails loudly once a WebView2 process is gone: the windows stay on screen showing an empty pond. The watch
+        // timer already ticks every few hundred milliseconds, so a peek at the wallpapers costs nothing and covers the case
+        // where the host was killed outright and ProcessFailed never arrived. Opening the interactive window is one-shot:
+        // while it is filling a view in, CoreWebView2 is still null, which would otherwise read as a lost pond and rebuild
+        // the desktop for nothing.
+        private bool AnyWallpaperLost()
+        {
+            if (rebuilding || opening || walls.Count == 0) return false;
+            foreach (var w in walls) if (w.View?.CoreWebView2 == null) return true;
+            return window != null && !window.IsDisposed && window.View?.CoreWebView2 == null;
         }
 
         private IEnumerable<WebView2> Views => walls.Select(w => w.View).Concat(new[] { window?.View }).Where(v => v?.CoreWebView2 != null);
@@ -352,6 +384,15 @@ namespace BichiPond
             MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "摸鱼", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
+        /// <summary>Records something worth knowing without interrupting anyone: a lost WebView2 process is recovered on its
+        /// own, so a dialog for it would be noise, but it still belongs in the log — a pond that silently stopped drawing once
+        /// would otherwise leave nothing behind to diagnose.</summary>
+        private static void Note(string what)
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond"), log = Path.Combine(dir, "error.log");
+            try { Directory.CreateDirectory(dir); File.AppendAllText(log, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what} (Windows {Environment.OSVersion.Version})\r\n\r\n"); } catch (Exception) { }
+        }
+
         // ---------- tray ----------
         private void BuildTray()
         {
@@ -467,7 +508,9 @@ namespace BichiPond
             }
             window = new InteractiveForm();
             window.FormClosed += (s, e) => { window = null; };
-            await window.Start(env, OnSave, panel);
+            opening = true;
+            try { await window.Start(env, OnSave, panel, OnProcessFailed); }
+            finally { opening = false; }
         }
 
         private static bool IsStartup()
