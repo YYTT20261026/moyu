@@ -25,11 +25,15 @@
   };
   const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
-  // Shoreline traced on the supplied 16:9 painting. Coordinates are normalized so the
-  // same map follows both the centred cover crop and the renderer's portrait rotation.
-  const mapPoint = ([x,y]) => [x/2048,y/1152];
+  // Shorelines are traced against the 2048×1152 artwork guide, then stored as UVs.
+  // Keep the guide size explicit: the runtime design space is 2560×1440, while the
+  // supplied 8K seasonal paintings are 7680×4320. Mixing those spaces is the easiest
+  // way to make an apparently small boundary edit drift after a resize or rotation.
+  const MAP_GUIDE = Object.freeze({ width: 2048, height: 1152 });
+  const DESIGN_SPACE = Object.freeze({ width: 2560, height: 1440 });
+  const mapPoint = ([x,y]) => [x / MAP_GUIDE.width, y / MAP_GUIDE.height];
   const POND_MAP = {
-    width:2560,height:1440,
+    width:DESIGN_SPACE.width,height:DESIGN_SPACE.height,
     water:[
       [0,567],[63,560],[148,513],[208,466],[241,407],[243,330],[226,289],[224,275],
       [283,321],[329,337],[405,348],[459,331],[509,294],[535,231],[569,205],
@@ -50,7 +54,7 @@
       [1066,1056],[1047,1078],[1009,1086],[974,1070]] .map(mapPoint)]
   };
   // Each seasonal painting has its own shoreline and emergent stones.
-  const seasonalMap = (water, rocks) => ({width:2560,height:1440,water:water.map(mapPoint),rocks:rocks.map(p=>p.map(mapPoint))});
+  const seasonalMap = (water, rocks) => ({width:DESIGN_SPACE.width,height:DESIGN_SPACE.height,water:water.map(mapPoint),rocks:rocks.map(p=>p.map(mapPoint))});
   const POND_MAPS = {
     spring:POND_MAP,
     summer:seasonalMap([
@@ -531,11 +535,24 @@
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
+  function validatePondMaps(maps=POND_MAPS) {
+    for(const season of Object.keys(SEASONS)) {
+      const map=maps[season];
+      if(!map||map.width!==DESIGN_SPACE.width||map.height!==DESIGN_SPACE.height) throw Error(`invalid ${season} pond design space`);
+      if(!Array.isArray(map.water)||map.water.length<8) throw Error(`invalid ${season} shoreline`);
+      for(const polygon of [map.water,...map.rocks]) {
+        if(!Array.isArray(polygon)||polygon.length<3) throw Error(`invalid ${season} boundary polygon`);
+        for(const point of polygon) if(!Array.isArray(point)||point.length!==2||point.some(v=>!Number.isFinite(v)||v<0||v>1)) throw Error(`invalid ${season} boundary coordinate`);
+      }
+    }
+    return true;
+  }
+  validatePondMaps();
   // The size range a koi can be given: the "我的锦鲤" panel's slider spans it, and it is what a saved
   // fish is clamped to, so a fish made in the panel never comes back a different size.
   // Sprite width is BODY.width = 96, so size 1 is 96px long at pond scale 1: the max is the 96px upper bound.
   const KOI_SIZE = { min: .45, max: 1, initial: 1 };
-  const api={PALETTES,KOI_SIZE,TEMPERS,TEMPER_TRAITS,koiAge,fishPalette,BODY,POND_MAP,POND_MAPS,SEASONS,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,KOI_SIZE,TEMPERS,TEMPER_TRAITS,koiAge,fishPalette,BODY,POND_MAP,POND_MAPS,SEASONS,MAP_GUIDE,DESIGN_SPACE,validatePondMaps,PondHabitat,randomSeed,weatherFromCode,seasonFromMonth,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);

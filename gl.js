@@ -465,8 +465,8 @@ void main(){
   // Fit the W×H painting to a w×h screen, cropping like CSS 'cover'. On a portrait screen the painting (a pond seen
   // from straight above) is turned a quarter clockwise, so the whole pond, lotus corners and all, fills a phone.
   // Returns image uv = (u·s, v·s) with s = (screen x / w, screen y / h, 1), and turn = quarter turns applied.
-  function fitBed(W, H, w, h, allowTurn = true) {
-    const turn = allowTurn && h > w * 1.15 ? 1 : 0, ia = turn ? H / W : W / H, sa = w / h;
+  function fitBed(W, H, w, h, allowTurn = true, displayMode = 'auto') {
+    const turn = allowTurn && displayMode !== 'dual' && h > w * 1.15 ? 1 : 0, ia = turn ? H / W : W / H, sa = w / h;
     const r = sa > ia ? [0, (1 - ia / sa) / 2, 1, ia / sa] : [(1 - sa / ia) / 2, 0, sa / ia, 1];
     // In the turned picture (ru, rv) = (r0 + su·r2, r1 + sv·r3); turning back: image u = rv, image v = 1 − ru.
     return turn ? { u: [0, r[3], r[1]], v: [-r[2], 0, 1 - r[0]], turn } : { u: [r[2], 0, r[0]], v: [0, r[3], r[1]], turn };
@@ -569,13 +569,13 @@ void main(){
     for (const s of Object.values(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
     let atlasDirty = true;
 
-    const state = { w: 1, h: 1, dpr: 1, quality: 'high', scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
+    const state = { w: 1, h: 1, dpr: 1, quality: 'high', displayMode: 'auto', scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
     const drops = [];
     const batches = {}; for (const l of LAYERS) batches[l] = new Batch();
 
-    function resize(w, h, dpr, quality) {
-      if(state.scene&&state.w===w&&state.h===h&&state.dpr===dpr&&state.quality===quality)return;
-      Object.assign(state, { w, h, dpr, quality });
+    function resize(w, h, dpr, quality, displayMode = 'auto') {
+      if(state.scene&&state.w===w&&state.h===h&&state.dpr===dpr&&state.quality===quality&&state.displayMode===displayMode)return;
+      Object.assign(state, { w, h, dpr, quality, displayMode });
       const px = w * h * dpr * dpr, cap = quality === 'eco' ? 1.6e6 : 3.6e6, k = px > cap ? Math.sqrt(cap / px) : 1;
       canvas.width = Math.max(1, Math.round(w * dpr * k)); canvas.height = Math.max(1, Math.round(h * dpr * k));
       freeTarget(state.scene); freeTarget(state.shadow); freeTarget(state.caustic); freeTarget(state.surface); freeTarget(state.cloud); state.sim.forEach(freeTarget);
@@ -595,7 +595,7 @@ void main(){
       if (!state.sim[0] || !state.sim[1]) state.sim = [null, null];
       for (const t of state.sim) if (t) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      state.bed = fitBed(bedImage.width, bedImage.height, w, h);
+      state.bed = fitBed(bedImage.width, bedImage.height, w, h, true, displayMode);
     }
     // Map a point of the painting's design space (POND_MAP 2560×1440) to screen CSS pixels.
     // Without an explicit design, coordinates are the bed image's own pixels.
@@ -749,7 +749,7 @@ void main(){
         prepareBackground(image,mask);if(lost)return;
         bedImage=image;
         const cached=backgrounds.get(image);bedTex=cached.bed;floatTex=cached.mask;
-        state.bed=fitBed(image.width,image.height,state.w,state.h);
+        state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);
         drops.length=0;
       },
       drop(x, y, r, s) { if (drops.length < 96) drops.push([x, y, r, s]); },
@@ -845,12 +845,12 @@ void main(){
     return {
       kind: '2d', ripples: false, sprites,
       prepareBackground() {},
-      setBackground(image) { bedImage=image;state.bed=fitBed(image.width,image.height,state.w,state.h,false);rings.length=0; },
-      resize(w, h, dpr) {
-        Object.assign(state, { w, h, dpr: Math.min(dpr, 1.5) });
+      setBackground(image) { bedImage=image;state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);rings.length=0; },
+      resize(w, h, dpr, quality, displayMode = 'auto') {
+        Object.assign(state, { w, h, dpr: Math.min(dpr, 1.5), displayMode });
         canvas.width = Math.round(w * state.dpr); canvas.height = Math.round(h * state.dpr);
         // The CSS backdrop behind this canvas is a plain centred cover crop, so the painting is never turned here.
-        state.bed = fitBed(bedImage.width, bedImage.height, w, h, false);
+        state.bed = fitBed(bedImage.width, bedImage.height, w, h, true, displayMode);
       },
       imageToScreen(x, y) { return bedToScreen(state.bed, x / (designW || bedImage.width), y / (designH || bedImage.height), state.w, state.h); },
       setFish(i, sprite) { const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },

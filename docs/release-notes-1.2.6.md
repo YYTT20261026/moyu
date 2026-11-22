@@ -9,6 +9,8 @@
 - Android APK 260 MB → 36 MB：手机改用 2560×1440 底图（多数手机纹理上限为 4096，8K 也会被降采样）。
 - 设备纹理上限不足时渲染器自动缩小上传，采样保持归一化，画面与元素位置不变。
 - Android 壁纸状态更易诊断：WebView 的控制台错误与资源大小会写进 logcat，「设置 › 手机动态壁纸」也会显示「底图 xxMB · 静图 xxKB」。
+- Windows、macOS 与 Web 共用「自动适配 / 双屏独立 / 竖屏适配」显示布局设置；macOS 继续使用四季 8K 原图级底图。
+- 四季天气画面整体降低饱和度，使池塘色彩更柔和。
 
 ## 修复
 - 修复切换底图后荷叶与锦鲤跑到鱼塘之外（坐标此前绑定底图像素分辨率）。
@@ -19,7 +21,7 @@
 ## 下载（Release 附件，ASCII 命名）
 - Windows：`MoYu-1.2.6-Windows-Setup.exe`（安装器） / `MoYu-1.2.6-Windows.zip`（便携版）
 - Android：`MoYu-1.2.6-Android.apk`
-- macOS：`MoYu-1.2.6-macOS.dmg`（需在 Mac 上构建，本版本未附）
+- macOS：`MoYu-1.2.6-macOS-arm64-8K.dmg`（Apple Silicon，8K 原图级底图）
 - Web：`MoYu-1.2.6-Web.zip`（在线部署直接使用 8K PNG；本地双击打开时使用包内 2560×1440 的内嵌底图，169MB 的 8K 内嵌版未打包进去）
 
 > 版本号：Windows / macOS 1.2.6，Android 1.2.6（versionCode 6）。
