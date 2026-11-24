@@ -82,7 +82,7 @@ const backgroundCache=new Map();
 const backgroundMasks=new Map();
 let backgroundWarmGeneration=0;
 function backgroundMask(season,image){
-  if(!backgroundMasks.has(season))backgroundMasks.set(season,PondScene.floatMask(image.naturalWidth,image.naturalHeight,season));
+  if(!backgroundMasks.has(season))backgroundMasks.set(season,PondScene.floatMask(image.naturalWidth,image.naturalHeight,season,image));
   return backgroundMasks.get(season);
 }
 const inIdle=job=>window.requestIdleCallback?requestIdleCallback(job,{timeout:1500}):setTimeout(job,120);
@@ -168,11 +168,23 @@ function toast(message){
 // desktop screens in check). A device that cannot keep up steps down in two stages, never below 1×, for this session.
 const perf={t:0,n:0,level:0,scales:[1,.72,.5]};
 const targetFps=()=>Math.min(hostFps,settings.quality==='eco'?30:60);
+function syncBackdrop(){
+  const bed=$('.pond-bed');
+  if(renderer?.kind!=='2d'){
+    for(const key of ['width','height','transform','transformOrigin','backgroundSize'])bed.style[key]='';
+    return;
+  }
+  // The Canvas foreground mask, koi and CSS painting must share the same portrait turn/crop.
+  const W=POND_MAP.width,H=POND_MAP.height,o=renderer.imageToScreen(0,0);
+  const x=renderer.imageToScreen(W,0),y=renderer.imageToScreen(0,H);
+  Object.assign(bed.style,{width:`${W}px`,height:`${H}px`,backgroundSize:'100% 100%',transformOrigin:'0 0',
+    transform:`matrix(${(x[0]-o[0])/W},${(x[1]-o[1])/W},${(y[0]-o[0])/H},${(y[1]-o[1])/H},${o[0]},${o[1]})`});
+}
 function resize(){
   width=innerWidth;height=innerHeight;dpr=settings.quality==='eco'?1:Math.max(1,Math.min(devicePixelRatio||1,3)*perf.scales[perf.level]);
   simulation.width=width;simulation.height=height;simulation.scale=clamp(Math.min(width,height)/720,.66,1.25);
   labels.width=Math.round(width*dpr);labels.height=Math.round(height*dpr);
-  if(renderer){renderer.resize(width,height,dpr,settings.quality,settings.displayMode);scene.layout(width,height);}
+  if(renderer){renderer.resize(width,height,dpr,settings.quality,settings.displayMode);syncBackdrop();scene.layout(width,height);}
 }
 addEventListener('resize',resize);resize();
 // Sprites are keyed by what they depict; pond fish never change after creation, the preview does.
@@ -346,7 +358,7 @@ async function syncSeason(){
     $('.pond-bed').style.backgroundImage=`url("${SEASONS[season].image}")`;
     document.body.dataset.season=season;$('#season-label').textContent=SEASONS[season].title;
     if(renderer){
-      renderer.setBackground(image,backgroundMask(season,image));
+      renderer.setBackground(image,backgroundMask(season,image));syncBackdrop();
       scene.setSeason(season);scene.layout(width,height);syncShelters();
     }else createPond();
     if(activePanel==='weather')updateSeasonOptions();

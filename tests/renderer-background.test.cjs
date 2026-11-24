@@ -18,8 +18,16 @@ function renderer(kind='webgl2',bed,design){
       if(name==='getUniformLocation')return args[1];
     };
   }});
-  const canvas={width:1,height:1,addEventListener(){},getContext(type){return type==='webgl2'?(kind==='webgl2'?gl:null):{};}};
-  const context={window:{PondCore:core},console};
+  const canvasContext=()=>new Proxy({globalCompositeOperation:'source-over',globalAlpha:1},{get(target,name){
+    if(name in target)return target[name];
+    return (...args)=>{
+      calls.push(['2d',name,target.globalCompositeOperation,...args]);
+      if(name==='getImageData')return {data:new Uint8ClampedArray([255,0,0,255,0,255,255,255,128,0,0,128])};
+    };
+  }});
+  const ctx=canvasContext();
+  const canvas={width:1,height:1,addEventListener(){},getContext(type){return type==='webgl2'?(kind==='webgl2'?gl:null):ctx;}};
+  const context={window:{PondCore:core},console,document:{createElement(){const context=canvasContext();return {width:1,height:1,getContext(){return context;}};}}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../gl.js'),'utf8'),context);
   const image=bed||{width:2560,height:1440},mask={width:image.width/2,height:image.height/2};
   const r=context.window.PondGL.createRenderer(canvas,image,{},null,mask,design);
@@ -108,10 +116,64 @@ for(const kind of ['webgl2','2d'])test(`${kind}：更换图片后无需 resize�
   const context={window:{PondCore:core}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../gl.js'),'utf8'),context);
   const {fitBed,bedToScreen}=context.window.PondGL;
-  const bed=fitBed(image.width,image.height,390,844,kind==='webgl2');
+  const bed=fitBed(image.width,image.height,390,844,true);
   for(const [x,y] of [[0,0],[720,1280],[1440,2560]])assert.deepEqual(
     Array.from(r.imageToScreen(x,y)),Array.from(bedToScreen(bed,x/1440,y/2560,390,844))
   );
+});
+
+test('Canvas：仅红通道遮挡水下层，荷花与空中层不被擦除，季节遮罩只提取一次',()=>{
+  const {r,calls,image,mask}=renderer('2d');r.resize(1280,720,1,'high');
+  calls.length=0;r.prepareBackground(image,mask);
+  const pixels=calls.find(c=>c[0]==='2d'&&c[1]==='putImageData')[3].data;
+  assert.deepEqual([pixels[3],pixels[7],pixels[11]],[255,0,64],'阴影与湿边不是前景，边缘 alpha 保留');
+  const sprite=(name)=>({canvas:{name,width:10,height:10},ppu:1,px:.5,py:.5});
+  const under=sprite('under'),lotus=sprite('lotus'),air=sprite('air');
+  calls.length=0;
+  for(let frame=0;frame<2;frame++){
+    r.sprite('under',under,500,100,0,1,1);
+    r.plant('plants',lotus,500,100,0,1,1,0,true,1);
+    r.sprite('air',air,500,100,0,1,1);
+    r.render(frame/60,1/60);
+  }
+  const draws=calls.filter(c=>c[0]==='2d'&&c[1]==='drawImage');
+  const cut=draws.findIndex(c=>c[2]==='destination-out');
+  assert.ok(cut>0&&draws[cut-1][3]===under.canvas,'先画水下鱼，再擦除前景区域');
+  assert.ok(draws[cut+1][3]===lotus.canvas,'荷花在前景遮挡之后绘制');
+  assert.ok(draws.some(c=>c[3]===air.canvas&&c[2]==='source-over'),'空中层仍在上方');
+  assert.equal(calls.filter(c=>c[1]==='getImageData').length,0,'连续渲染复用遮罩');
+  const nextMask={width:1280,height:720};r.setBackground(image,nextMask);r.render(1,1/60);
+  assert.equal(calls.filter(c=>c[1]==='getImageData').length,1,'换季更新遮挡');
+});
+
+for(const [w,h,mode] of [[1280,720,'auto'],[390,844,'auto'],[2560,720,'dual']])test(`Canvas 前景遮罩与底图坐标一致：${w}×${h} ${mode}`,()=>{
+  const {r,calls,mask}=renderer('2d',{width:7680,height:4320},{width:2560,height:1440});
+  r.resize(w,h,2,'high',mode);calls.length=0;r.render(0,1/60);
+  const matrix=calls.find(c=>c[0]==='2d'&&c[1]==='transform').slice(3);
+  const [a,b,c,d,e,f]=matrix;
+  for(const [u,v] of [[0,0],[.8,.2],[1,1]]){
+    const actual=[a*u*mask.width+c*v*mask.height+e,b*u*mask.width+d*v*mask.height+f];
+    const expected=r.imageToScreen(u*2560,v*1440);
+    actual.forEach((value,i)=>assert.ok(Math.abs(value-expected[i])<1e-8));
+  }
+});
+
+test('Canvas CSS 底图同步前景遮罩的旋转裁切，切回 WebGL 清除后备样式',()=>{
+  const source=fs.readFileSync(require.resolve('../app.js'),'utf8');
+  const sync=source.slice(source.indexOf('function syncBackdrop(){'),source.indexOf('function resize(){'));
+  for(const [w,h,mode] of [[1280,720,'auto'],[390,844,'auto'],[2560,720,'dual']]){
+    const {r}=renderer('2d',{width:7680,height:4320},{width:2560,height:1440});r.resize(w,h,1,'high',mode);
+    const bed={style:{}},context={renderer:r,POND_MAP:core.POND_MAP,$(){return bed;}};
+    vm.runInNewContext(`${sync}\nsyncBackdrop();`,context);
+    assert.equal(bed.style.backgroundSize,'100% 100%');
+    const [a,b,c,d,e,f]=bed.style.transform.slice(7,-1).split(',').map(Number);
+    for(const [x,y] of [[0,0],[2100,300],[2560,1440]]){
+      const expected=r.imageToScreen(x,y),actual=[a*x+c*y+e,b*x+d*y+f];
+      actual.forEach((value,i)=>assert.ok(Math.abs(value-expected[i])<1e-8,'CSS 底图与鱼、前景遮罩一致'));
+    }
+    context.renderer={kind:'webgl2'};vm.runInNewContext('syncBackdrop();',context);
+    for(const key of ['width','height','transform','transformOrigin','backgroundSize'])assert.equal(bed.style[key],'');
+  }
 });
 
 test('植物网格弯曲保留根部，绑定水面斜率且连续动画不重新上传贴图',()=>{

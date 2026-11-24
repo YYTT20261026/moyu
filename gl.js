@@ -836,20 +836,31 @@ void main(){
   }
 
   // ---------- Canvas 2D fallback ----------
-  function create2D(canvas, bedImage, sprites, design) {
+  function create2D(canvas, bedImage, sprites, design, floatMask) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     const designW = (design && design.width) || 0, designH = (design && design.height) || 0;
     const state = { w: 1, h: 1, dpr: 1, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } }, fishCanvases = [], rings = [], queue = {};
     for (const l of LAYERS) queue[l] = [];
+    const masks = new WeakMap();
+    const foregroundMask = mask => {
+      if (!mask) return null;
+      if (masks.has(mask)) return masks.get(mask);
+      const c=document.createElement('canvas');c.width=mask.width;c.height=mask.height;
+      const mc=c.getContext('2d', { willReadFrequently: true });mc.drawImage(mask,0,0);
+      const pixels=mc.getImageData(0,0,c.width,c.height),data=pixels.data;
+      for(let i=0;i<data.length;i+=4){data[i+3]=Math.round(data[i]*data[i+3]/255);data[i]=data[i+1]=data[i+2]=255;}
+      mc.putImageData(pixels,0,0);masks.set(mask,c);return c;
+    };
+    let foreground = null;
     return {
       kind: '2d', ripples: false, sprites,
-      prepareBackground() {},
-      setBackground(image) { bedImage=image;state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);rings.length=0; },
+      prepareBackground(image, mask) { foregroundMask(mask); },
+      setBackground(image, mask) { bedImage=image;floatMask=mask;foreground=null;state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);rings.length=0; },
       resize(w, h, dpr, quality, displayMode = 'auto') {
         Object.assign(state, { w, h, dpr: Math.min(dpr, 1.5), displayMode });
         canvas.width = Math.round(w * state.dpr); canvas.height = Math.round(h * state.dpr);
-        // The CSS backdrop behind this canvas is a plain centred cover crop, so the painting is never turned here.
+        // app.js maps the CSS backdrop with these same corners, including the portrait turn.
         state.bed = fitBed(bedImage.width, bedImage.height, w, h, true, displayMode);
       },
       imageToScreen(x, y) { return bedToScreen(state.bed, x / (designW || bedImage.width), y / (designH || bedImage.height), state.w, state.h); },
@@ -886,6 +897,16 @@ void main(){
             } else drawStrip2D(ctx, q[1], q[2], q[3], q[4], q[5], q[6]);
           }
           queue[l].length = 0;
+          if (l === 'under' && floatMask) {
+            foreground ||= foregroundMask(floatMask);
+            const origin=bedToScreen(state.bed,0,0,state.w,state.h);
+            const x=bedToScreen(state.bed,1,0,state.w,state.h),y=bedToScreen(state.bed,0,1,state.w,state.h);
+            ctx.save();ctx.globalAlpha=1;ctx.globalCompositeOperation='destination-out';
+            ctx.transform((x[0]-origin[0])/foreground.width,(x[1]-origin[1])/foreground.width,
+              (y[0]-origin[0])/foreground.height,(y[1]-origin[1])/foreground.height,origin[0],origin[1]);
+            // Reveal the original CSS bed instead of painting a differently tinted copy over it.
+            ctx.drawImage(foreground,0,0);ctx.restore();
+          }
         }
         ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
         for (const r of rings) { r.age += dt; const f = Math.max(0, 1 - r.age / r.max), rad = 4 + r.age * 60; ctx.strokeStyle = `rgba(244,250,228,${f * .5})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(r.x, r.y, rad, rad * .92, 0, 0, Math.PI * 2); ctx.stroke(); }
@@ -899,8 +920,8 @@ void main(){
   // pixel size, so a bed already drawn at design resolution behaves exactly as before.
   function createRenderer(canvas, bedImage, sprites, onLost, floatMask, design) {
     try { const r = createGL(canvas, bedImage, sprites, onLost, floatMask, design); if (r) return Object.assign(r, { canvas }); } catch (e) { console.warn('WebGL2 pond unavailable, using 2D', e); }
-    let target = canvas, r = create2D(target, bedImage, sprites, design);
-    if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites, design); }
+    let target = canvas, r = create2D(target, bedImage, sprites, design, floatMask);
+    if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites, design, floatMask); }
     return r && Object.assign(r, { canvas: target });
   }
   root.PondGL = { createRenderer, drawStrip2D, fitBed, bedToScreen, FISH_PPU, MAX_FISH };

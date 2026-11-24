@@ -55,7 +55,24 @@
   const grow = f => f[3] === 'f' || f[3] === 'b' ? 1.1 : f[3] === 'l' ? 1.02 : 1;
   // Mask in image space: red = above water (no refraction or caustics), green = casts a shadow on the bed,
   // blue = rests on the water and leaves a wet line (flowers on stalks do not).
-  function floatMask(width, height, season='spring') {
+  // The overhanging canopy is painted into each bed, but belongs above the swimming koi.
+  // Restrict colour extraction to its corner; unlike a solid polygon this keeps water visible
+  // between petals, leaves and twigs. These bounds are UVs, independent of the 8K source size.
+  const CANOPIES = {
+    spring: [[.64,0],[1,0],[1,.61],[.92,.61],[.82,.55],[.82,.43],[.85,.33],[.73,.25],[.68,.18]],
+    summer: [[.64,0],[1,0],[1,.57],[.94,.57],[.83,.45],[.82,.3],[.72,.25],[.68,.17]],
+    autumn: [[.64,0],[1,0],[1,.61],[.93,.61],[.83,.48],[.82,.33],[.73,.25],[.68,.18]],
+    winter: [[.64,0],[1,0],[1,.49],[.94,.49],[.86,.32],[.74,.25],[.68,.18]]
+  };
+  function canopyAlpha(r, g, b, season) {
+    const winter = season === 'winter', autumn = season === 'autumn', warm = r - (g + b) * .5;
+    const petals = smoothstep(winter ? -58 : autumn ? -20 : -50, winter ? -38 : autumn ? -4 : -32, warm)
+      * smoothstep(winter ? -60 : autumn ? -30 : -54, winter ? -38 : autumn ? -10 : -30, r - g);
+    // Dark green leaves are warmer than teal water, but bright green caustics are not leaves.
+    const leaves = smoothstep(4, 18, r - b) * smoothstep(18, 38, g - b) * (1 - smoothstep(135, 175, g));
+    return Math.max(petals, leaves) * smoothstep(65, 90, Math.max(r, g, b));
+  }
+  function floatMask(width, height, season='spring', image) {
     const map=POND_MAPS[season]||POND_MAPS.spring,defs=floaterDefinitions(season);
     // 底图可以是 8K；遮罩按标注尺度取样即可（采样用归一化坐标），不必跟着放大。
     const k = Math.min(.5, map.width / width), c = document.createElement('canvas');
@@ -72,6 +89,28 @@
       const [x, y, rx, kind, ry = rx, rot = 0] = f, g = grow(f), stalk = kind === 'b' || (kind === 'f' && rx > 25);
       ctx.fillStyle = kind === 'r' ? 'rgb(255,0,0)' : stalk ? 'rgb(255,255,0)' : 'rgb(255,255,255)';
       ctx.beginPath(); ctx.ellipse(x * kx, y * ky, rx * g * kx, ry * g * ky, rot, 0, TAU); ctx.fill();
+    }
+    if (image) {
+      const canopy = document.createElement('canvas');canopy.width=c.width;canopy.height=c.height;
+      const cc = canopy.getContext('2d', { willReadFrequently: true });
+      let pixels;
+      try {
+        cc.drawImage(image,0,0,c.width,c.height);
+        pixels=cc.getImageData(0,0,c.width,c.height);
+      } catch (error) {
+        // A host that disallows image readback must not break season switching or stop prewarming.
+        console.warn('Canopy pixels unavailable; preserving the shoreline mask',error);
+        return c;
+      }
+      const data=pixels.data;
+      for(let i=0;i<data.length;i+=4){
+        const alpha=canopyAlpha(data[i],data[i+1],data[i+2],season);
+        data[i]=255;data[i+1]=data[i+2]=0;data[i+3]=Math.round(alpha*255);
+      }
+      cc.putImageData(pixels,0,0);
+      ctx.save();path(CANOPIES[season]||CANOPIES.spring);ctx.clip();
+      // Red alone: branches do not touch the water, so no lotus wet line or contact shadow.
+      ctx.drawImage(canopy,0,0);ctx.restore();
     }
     return c;
   }

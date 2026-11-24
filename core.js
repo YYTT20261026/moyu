@@ -230,11 +230,14 @@
     const n = BODY.segments, seg = BODY.length / n * s, x = f.x * w, y = f.y * h, c = Math.cos(f.angle), si = Math.sin(f.angle);
     const nx = x + c * BODY.nose * s, ny = y + si * BODY.nose * s;
     let p = f.spine;
-    if (!p || Math.abs(f.spineSeg - seg) > seg * .3 || Math.hypot(p[0] - nx, p[1] - ny) > seg * 3) {
+    // A quick turn moves the nose even when the centre barely travels. Only an actual
+    // centre relocation (resize/teleport), not that nose sweep, should erase the curved trail.
+    const relocated = Number.isFinite(f.spineX) && Math.hypot(x - f.spineX, y - f.spineY) > BODY.length * s * .75;
+    if (!p || Math.abs(f.spineSeg - seg) > seg * .3 || relocated) {
       p = f.spine = new Float32Array((n + 1) * 2);
       for (let i = 0; i <= n; i++) { p[i*2] = nx - c * seg * i; p[i*2+1] = ny - si * seg * i; }
     }
-    f.spineSeg = seg;
+    f.spineSeg = seg; f.spineX = x; f.spineY = y;
     for (let i = 0; i <= rigid; i++) { p[i*2] = nx - c * seg * i; p[i*2+1] = ny - si * seg * i; }
     let prev = f.angle;
     for (let i = rigid + 1; i <= n; i++) {
@@ -325,7 +328,7 @@
     setShelters(points) { this.shelters = points && points.length ? points : null; }
     setHabitat(habitat) {
       this.habitat=habitat;
-      for(const f of this.fish){wake(f,this.random);this.confineFish(f);f.goal=null;f.spine=null;}
+      for(const f of this.fish){wake(f,this.random);this.confineFish(f);f.goal=null;f.spine=null;f.bankHold=0;f.bankSide=0;}
       this.food=this.food.filter(p=>this.isWater(p.x,p.y,4));
       for(const p of this.food)p.feedGoal=null;
     }
@@ -388,7 +391,10 @@
       const sdt=dt*clamp(speedFactor,.1,3);
       const neighbours=this.fish;
       for(const f of neighbours){wake(f,this.random);this.growFish(f,dt);this.confineFish(f);}
-      for(const f of neighbours)this.swim(f,sdt,neighbours);
+      // Accelerated/low-FPS playback must still trace turns in small steps; food ageing
+      // and growth above keep their real-time semantics rather than running once per substep.
+      const steps=Math.max(1,Math.ceil(sdt/(1/30)));
+      for(let i=0;i<steps;i++)for(const f of neighbours)this.swim(f,sdt/steps,neighbours);
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
       // Twice a second is plenty to learn who keeps company with whom.
       if(++this.tick%30===0)this.trackBonds();
@@ -478,17 +484,38 @@
       if(lx<mX)bx=(mX-lx)/mX;else if(lx>w-mX)bx=(w-mX-lx)/mX;
       if(ly<mY)by=(mY-ly)/mY;else if(ly>h-mY)by=(h-mY-ly)/mY;
       for(const ob of this.obstacles)for(const [px,py,R] of [[lx,ly,ob.r+L*.4],[x,y,ob.r+L*.2]]){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1;if(d<R){const k=(1-d/R)*2.5;bx+=dx/d*k;by+=dy/d*k;}}
+      let bank=null,bankUrgency=0,bankAngle=0;
       if(this.habitat){
         const edge=this.habitat.sample(x,y),ahead=this.habitat.sample(x+cos*Math.max(L,f.v*.5),y+sin*Math.max(L,f.v*.5)),margin=this.fishMargin(f);
         const near=clamp((margin+L*.8-edge.distance)/(L*.8),0,1),risk=clamp((margin+L*.4-ahead.distance)/L,0,2);
         const approaching=food&&f.flee<=0,avoid=approaching?.18:1;
         bx+=(edge.nx*near*2+ahead.nx*risk*2)*avoid;by+=(edge.ny*near*2+ahead.ny*risk*2)*avoid;
-        boundW=Math.max(boundW,approaching?.8:3);if(near>.5){turnGain=Math.max(turnGain,6);maxTurn=Math.max(maxTurn,4);want*=approaching?.8:.45;}
+        boundW=Math.max(boundW,approaching?.8:3);
+        // The normal push alone points exactly backwards in a head-on encounter. Pick a
+        // consistent tangent, then arc gently inward instead of oscillating on the bank.
+        const outward=-(cos*edge.nx+sin*edge.ny),tight=clamp((margin+L*.45-edge.distance)/(L*.45),0,1);
+        bankUrgency=tight*clamp((outward+.25)/.65,0,1);
+        f.bankHold=Math.max(0,(f.bankHold||0)-dt);
+        if(bankUrgency>.08){
+          if(!f.bankHold){
+            const tangent=cos*(-edge.ny)+sin*edge.nx,goalTangent=gx*(-edge.ny)+gy*edge.nx;
+            f.bankSide=Math.abs(tangent)>.15?Math.sign(tangent):Math.abs(goalTangent)>.1?Math.sign(goalTangent):f.turn<0?-1:1;
+          }
+          f.bankHold=.65;
+          const tx=-edge.ny*f.bankSide,ty=edge.nx*f.bankSide;
+          bankAngle=Math.atan2(ty+edge.ny*.55,tx+edge.nx*.55);bank=edge;
+          turnGain=Math.max(turnGain,7);maxTurn=Math.max(maxTurn,4.5);
+          // Keep a swimming pace while turning, rather than letting boundary braking
+          // collapse the tailbeat and leave the fish pivoting in place.
+          want=Math.max(want*(1-bankUrgency*.25),L*.24);
+        }else if(near>.5){turnGain=Math.max(turnGain,6);maxTurn=Math.max(maxTurn,4);want*=approaching?.8:.7;}
       }
       // A loner keeps a wider berth; a sociable fish tolerates a closer crowd.
       const sepMul=f.company<0?1.35:f.company>0?.8:1;
-      const desired=Math.atan2(gy+sy*sepW*sepMul+ay*.15+by*boundW,gx+sx*sepW*sepMul+ax*.15+bx*boundW);
-      f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:4));
+      let desired=Math.atan2(gy+sy*sepW*sepMul+ay*.15+by*boundW,gx+sx*sepW*sepMul+ax*.15+bx*boundW);
+      if(bank)desired=wrap(desired+wrap(bankAngle-desired)*bankUrgency);
+      const response=f.flee>0?14:4+bankUrgency*10;
+      f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*(1-Math.exp(-dt*response));
       f.angle=wrap(f.angle+f.turn*dt);
       // Thrust follows how much speed is still missing, so the tailbeat swells and fades with the effort
       // instead of snapping between "beating" and "gliding".
@@ -507,9 +534,23 @@
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*4);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
       if(this.habitat&&!this.isWater(x,y,this.fishMargin(f))){
-        const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY);
-        x=oldX;y=oldY;f.v*=.45;
-        f.angle=wrap(f.angle+clamp(wrap(Math.atan2(edge.ny,edge.nx)-f.angle),-dt*7,dt*7));f.goal=null;
+        const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY),margin=this.fishMargin(f);
+        const dx=x-oldX,dy=y-oldY,into=Math.min(0,dx*edge.nx+dy*edge.ny);
+        // Remove only the into-bank part, keeping the useful along-bank motion. Local
+        // projection may follow a curved edge, but must never teleport through a rock.
+        const slideX=oldX+dx-edge.nx*into,slideY=oldY+dy-edge.ny*into;
+        x=oldX;y=oldY;
+        for(const fraction of [1,.5,.25]){
+          const px=oldX+(slideX-oldX)*fraction,py=oldY+(slideY-oldY)*fraction;
+          const safe=this.isWater(px,py,margin)?[px,py]:this.habitat.project(px,py,margin+.05);
+          if(safe&&Math.hypot(safe[0]-oldX,safe[1]-oldY)<=Math.hypot(dx,dy)*1.25+.1){
+            const midX=(oldX+safe[0])*.5,midY=(oldY+safe[1])*.5;
+            if(this.isWater(midX,midY,margin-.05)){x=safe[0];y=safe[1];break;}
+          }
+        }
+        // Time-scaled drag, not a per-frame 55% penalty. Steering remains entirely
+        // in f.turn so the spine and pectoral fins agree with the head's actual motion.
+        f.v*=Math.exp(-dt*.8);f.goal=null;f.rest=0;
         // Blocked by the bank while chasing a pellet: let it go for a moment instead of pressing
         // into the edge again on the very next frame, which read as a stutter.
         if(food)f.foodCooldown=.5+this.random()*.4;

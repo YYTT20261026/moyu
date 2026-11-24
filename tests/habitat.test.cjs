@@ -14,6 +14,61 @@ function layout(w,h,allowTurn=true) {
 }
 const at=([x,y])=>[x,y];
 
+function bankEncounter({fps=60,speed=1,angle=0,corner=false,rock=false,seconds=1}={}) {
+  const w=1000,h=700,f=createFish(0,()=>.5);
+  Object.assign(f,{size:1,baseSize:1,x:rock?.36599:.91599,y:corner?.87999:.5,angle});
+  const pond=new PondSimulation([f],w,h,()=>.5);
+  const map={width:w,height:h,water:[[0,0],[1,0],[1,1],[0,1]],rocks:rock?[[[.45,.35],[.55,.35],[.55,.65],[.45,.65]]]:[]};
+  pond.setHabitat(new PondHabitat(w,h,(x,y)=>[x,y],map));pond.step(0);
+  Object.assign(f,{v:46,turn:0,cruise:.4,bankHold:0,goal:{x:rock?.8:.2,y:corner?.2:.5},goalTime:10});
+  const start=[f.x*w,f.y*h],initialSpine=f.spine;
+  let minSpeed=f.v,longestStop=0,stop=0,travel=0,maxAngleStep=0,maxNoseStep=0,resets=0;
+  for(let i=0;i<fps*seconds;i++){
+    const x=f.x*w,y=f.y*h,angle=f.angle,spine=f.spine,nose=[spine[0],spine[1]];
+    pond.step(1/fps,speed);
+    const distance=Math.hypot(f.x*w-x,f.y*h-y);
+    travel+=distance;stop=distance<.001?stop+1:0;longestStop=Math.max(longestStop,stop/fps);
+    minSpeed=Math.min(minSpeed,f.v);resets+=f.spine!==spine?1:0;
+    maxAngleStep=Math.max(maxAngleStep,Math.abs(core.wrap(f.angle-angle)));
+    maxNoseStep=Math.max(maxNoseStep,Math.hypot(f.spine[0]-nose[0],f.spine[1]-nose[1]));
+    assert.ok(pond.isWater(f.x*w,f.y*h,pond.fishMargin(f)),'触边滑行仍保留全鱼体安全距离');
+    const pose=fishPose(f,1);
+    assert.ok(pose.every(Number.isFinite));
+    for(let j=0;j<pose.length;j+=4)assert.ok(pond.isWater(pose[j],pose[j+1],BODY.half),'转身尾摆仍在水域');
+    let length=0;
+    for(let j=1;j<=BODY.segments;j++)length+=Math.hypot(f.spine[j*2]-f.spine[j*2-2],f.spine[j*2+1]-f.spine[j*2-1]);
+    assert.ok(Math.abs(length/BODY.length-1)<1e-5,'急转时鱼身不拉伸');
+  }
+  return {pond,f,start,initialSpine,minSpeed,longestStop,travel,maxAngleStep,maxNoseStep,resets};
+}
+
+for(const fps of [30,60,120])for(const speed of [1,2])test(`${fps} FPS ${speed}倍速：正面触岸保持滑行，不骤停或拉直鱼身`,()=>{
+  const r=bankEncounter({fps,speed});
+  assert.ok(r.minSpeed>10,`触岸后游速塌陷：${r.minSpeed}`);
+  assert.ok(r.longestStop<.07,`触岸连续停滞 ${r.longestStop}s`);
+  assert.ok(r.travel>12,'一秒内保持有效游动，而不是原地摆尾');
+  assert.ok(r.f.x*1000<r.start[0]-5,'一秒内主动离岸');
+  assert.equal(r.resets,0,'正常触边转头不能被当作瞬移而重建脊柱');
+  assert.equal(r.f.spine,r.initialSpine);
+  assert.ok(r.maxAngleStep<=4.5*speed/fps+.001,'转身由连续角速度驱动，无额外角度跳变');
+});
+
+test('触边脱离轨迹与速度基本不依赖帧率，低帧率加速不出现姿态抽动',()=>{
+  for(const speed of [1,2]){
+    const a=bankEncounter({fps:30,speed}),b=bankEncounter({fps:120,speed});
+    assert.ok(Math.hypot((a.f.x-b.f.x)*1000,(a.f.y-b.f.y)*700)<2,'30/120 FPS 离岸轨迹应接近');
+    assert.ok(Math.abs(a.minSpeed-b.minSpeed)<2,'不按碰撞帧数反复乘降速倍率');
+    assert.ok(a.maxNoseStep<15,'鼻尖在加速转向中平滑移动');
+  }
+});
+
+for(const options of [{angle:.55},{angle:Math.PI/4,corner:true},{rock:true}])test(`斜撞、角点或石边：${JSON.stringify(options)}，滑行脱离而非反复卡住`,()=>{
+  const r=bankEncounter({...options,seconds:2});
+  assert.ok(r.travel>25,'两秒内沿边转弯离开');
+  assert.ok(r.longestStop<.1,'不能在角点反复吞掉移动');
+  assert.ok(r.minSpeed>8,'保持可见的游动速度');
+});
+
 test('新底图的岸边、露出水面的石头不可投喂，水下卵石仍属于水域',()=>{
   const {habitat,transform}=layout(2560,1440);
   const rock=POND_MAP.rocks[0];

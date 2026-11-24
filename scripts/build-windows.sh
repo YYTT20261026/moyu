@@ -6,7 +6,7 @@ set -euo pipefail
 setopt null_glob
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOTNET="${DOTNET:-$(command -v dotnet || echo "$HOME/.dotnet/dotnet")}"
-VERSION="1.2.6"
+VERSION="1.2.7"
 PROJ="$ROOT/native/windows"
 OUT="$ROOT/build/windows/BichiPond"
 ZIP="$ROOT/dist/摸鱼-Windows-$VERSION.zip"

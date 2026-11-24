@@ -8,6 +8,46 @@ vm.runInNewContext(fs.readFileSync(require.resolve('../art.js'), 'utf8'), contex
 vm.runInNewContext(fs.readFileSync(require.resolve('../scene.js'), 'utf8'), context);
 const { PondScene, lookFor } = context.window.PondScene;
 
+test('四季花树前景提取保留花、叶、枝，水面空隙透明且不附加荷叶湿边',()=>{
+  const colors=[[240,215,225],[215,220,175],[180,80,25],[180,200,220],[92,120,134],[80,120,45],[105,70,40],[25,140,125],[85,180,100],[20,48,65]];
+  const canvases=[];
+  const document={createElement(){
+    const calls=[],ctx={drawImage(...args){calls.push(['drawImage',...args]);},getImageData(){return {data:new Uint8ClampedArray(colors.flatMap(c=>[...c,255]))};},putImageData(p){this.pixels=p.data;},
+      beginPath(){},lineTo(){},moveTo(){},closePath(){},fillRect(){},fill(){},ellipse(){},clip(){calls.push(['clip']);},save(){},restore(){}};
+    const canvas={width:1,height:1,calls,getContext(){return ctx;}};canvases.push(canvas);return canvas;
+  }};
+  const context={window:{PondCore:core,PondArt:{halfWidth(){},girthOf(){}}},document};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../scene.js'),'utf8'),context);
+  for(const season of ['spring','summer','autumn','winter']){
+    canvases.length=0;
+    const water=JSON.stringify(core.POND_MAPS[season].water);
+    const mask=context.window.PondScene.floatMask(7680,4320,season,{width:7680,height:4320});
+    assert.deepEqual([mask.width,mask.height],[2560,1440],'按设计尺度缓存，不分配 8K 遮罩');
+    const extracted=canvases[1].getContext().pixels;
+    const alpha=i=>extracted[i*4+3];
+    assert.equal(alpha(0),255,'粉色花瓣');assert.equal(alpha(1),255,'浅黄色夏花');assert.equal(alpha(2),255,'秋叶');
+    if(season==='winter')assert.equal(alpha(3),255,'偏蓝的白色冬花');
+    if(season==='spring'||season==='summer')assert.ok(alpha(4)>180,'阴影中的花瓣');
+    assert.equal(alpha(5),255,'绿色树叶');assert.equal(alpha(6),255,'暖色树枝');
+    for(const i of [7,8,9])assert.equal(alpha(i),0,'水色、焦散与深水透明');
+    for(let i=0;i<extracted.length;i+=4)assert.deepEqual(Array.from(extracted.slice(i,i+3)),[255,0,0],'树冠不附加湿边与水面接触阴影');
+    assert.ok(mask.calls.some(c=>c[0]==='clip'),'色彩提取仅限树冠轮廓，池心水面不被遮挡');
+    assert.equal(JSON.stringify(core.POND_MAPS[season].water),water,'鱼仍可游进树冠下方，水域边界不变');
+  }
+});
+
+test('底图像素回读被宿主拒绝时保留岸线遮罩，不中断换季',()=>{
+  let warnings=0;
+  const ctx={drawImage(){},getImageData(){throw new Error('SecurityError');},beginPath(){},lineTo(){},moveTo(){},closePath(){},fillRect(){},fill(){},ellipse(){}};
+  const context={window:{PondCore:core,PondArt:{}},console:{warn(){warnings++;}},document:{createElement(){return {width:1,height:1,getContext(){return ctx;}};}}};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../scene.js'),'utf8'),context);
+  for(const season of ['spring','summer','autumn','winter']){
+    const mask=context.window.PondScene.floatMask(7680,4320,season,{});
+    assert.deepEqual([mask.width,mask.height],[2560,1440]);
+  }
+  assert.equal(warnings,4);
+});
+
 // A stand-in renderer: the painting maps 1:1 onto a 1672×941 screen.
 function pond(seed = 7) {
   let s = seed; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);

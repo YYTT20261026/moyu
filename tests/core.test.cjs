@@ -53,6 +53,30 @@ test('游动姿态沿脊柱弯曲，数值有限且体长基本不变',()=>{
     assert.ok(Math.abs(len/(BODY.length*s)-1)<.12,`体长偏差 ${len/(BODY.length*s)}`);
   }
 });
+test('脊柱区分原地快速转头与真正瞬移，转头保留弯曲轨迹而换位置重建',()=>{
+  const {updateSpine}=require('../core.js');
+  const f=createFish(0,randomSeed(8));Object.assign(f,{x:.5,y:.5,size:1,angle:0});
+  updateSpine(f,1,1000,700);const spine=f.spine;
+  f.angle=.6;updateSpine(f,1,1000,700);
+  assert.equal(f.spine,spine,'20px 鼻尖转动不是中心瞬移');
+  const tail=BODY.segments*2,tailAngle=Math.atan2(spine[tail-1]-spine[tail+1],spine[tail-2]-spine[tail]);
+  assert.ok(Math.abs(tailAngle-f.angle)>.05,'转头时尾部跟随旧路径，不能整条鱼瞬间拉直');
+  f.x=.8;updateSpine(f,1,1000,700);
+  assert.notEqual(f.spine,spine,'真正移位后重建脊柱，避免尾部被拉长');
+});
+
+test('加速游动只细分游动步长，不加速食物寿命和生长计时',()=>{
+  const f=createFish(0,randomSeed(2)),pond=new PondSimulation([f],1000,700,()=>.5);
+  pond.feed(500,300,1);const food=pond.food[0];
+  let calls=0,elapsed=0,growthTime=0,maxStep=0;
+  pond.swim=(fish,dt)=>{calls++;elapsed+=dt;maxStep=Math.max(maxStep,dt);};
+  pond.growFish=(fish,dt)=>{growthTime+=dt;};
+  pond.step(.05,3);
+  assert.ok(calls>1&&maxStep<=1/30,'加速下仍按小步长更新转身');
+  assert.ok(Math.abs(elapsed-.15)<1e-9);assert.equal(growthTime,.05);
+  assert.equal(food.age,.05);assert.equal(food.life,24.95);
+});
+
 test('观鱼模式轻点水面，附近的鱼会受惊游开',()=>{
   const random=randomSeed(5),fish=createFish(0,random);fish.x=.5;fish.y=.5;fish.angle=0;
   const pond=new PondSimulation([fish],1000,700,random);pond.step(1/60);
