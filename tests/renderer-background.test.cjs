@@ -176,6 +176,21 @@ test('Canvas CSS 底图同步前景遮罩的旋转裁切，切回 WebGL 清除�
   }
 });
 
+test('石头天气绘制绑定共用岸线遮罩，最终折射检测岸线避免拖入岸石',()=>{
+  const {r,calls}=renderer();r.resize(1280,720,1,'high');
+  const shaders=calls.filter(c=>c[0]==='shaderSource').map(c=>c[2]);
+  const final=shaders.find(s=>s.includes('float crossed ='));
+  assert.ok(final&&final.includes('bedUv(clamp(vUv + offset * .5'),'折射同时检测终点和半程');
+  assert.ok(final.includes('offset *= 1. - smoothstep'),'进入岸石的折射位移平滑回到本像素');
+  const stone=shaders.find(s=>s.includes('if (vWet < .05)'));
+  assert.ok(stone&&stone.includes('a *= texture(uFloat, vUv).r'),'石头后绘制不能越过共用水岸遮罩');
+  const context={window:{PondCore:core}};
+  for(const file of ['art.js','scene.js'])vm.runInNewContext(fs.readFileSync(require.resolve(`../${file}`),'utf8'),context);
+  const env=Object.assign(context.window.PondScene.lookFor('sunny',false),{sun:[-.45,.45,.77],shadowDir:[.7,.72],cloudWind:[20,-7],moonDisc:[0,0,1,0],causticCell:90});
+  calls.length=0;r.floater(1200,800,100,70,0,0,0,0,0,1,0);r.render(0,1/60,env);
+  assert.ok(calls.some(c=>c[0]==='uniform1i'&&c[1]==='uFloat'&&c[2]===4),'天气层实际绑定岸线纹理，不能默认采样底图');
+});
+
 test('植物网格弯曲保留根部，绑定水面斜率且连续动画不重新上传贴图',()=>{
   const {r,calls}=renderer();r.resize(1280,720,1,'high');
   const context={window:{PondCore:core}};

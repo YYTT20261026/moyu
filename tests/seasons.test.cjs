@@ -230,3 +230,14 @@ test('投食水波传播到荷叶后产生弹性起伏、逐渐回稳，换季�
   scene.setSeason('winter');R.imageToScreen=layout('winter',1280,720).imageToScreen;scene.layout(1280,720);
   assert.equal(scene.plantRipples.length,0);assert.ok(scene.lotusPlants.every(p=>p.bend===0&&p.ox===0));
 });
+
+test('季节缩略图同步解码，面板打开或重绘时不留空框',()=>{
+  // 页面里仅有的 <img> 就是这四张预览图。异步解码会先把尚未解码的图画成空框、稍后再补画；
+  // 面板在池塘准备 8K 底图时打开或重渲染，补画偶尔丢失，四个季节按钮就一直是空白。
+  const app=fs.readFileSync(require.resolve('../app.js'),'utf8').replace(/^\s*\/\/.*$/gm,'');
+  const tags=app.match(/<img\s[^>]*>/g)||[];
+  assert.ok(tags.length>0,'四季预览仍是 <img>');
+  assert.ok(tags.every(tag=>tag.includes('${s.thumbnail}')),'只有季节预览用到 <img>');
+  assert.ok(tags.every(tag=>tag.includes('decoding="sync"')),'页面里的 <img> 一律同步解码');
+  assert.ok(!app.includes('decoding="async"'));
+});

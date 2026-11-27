@@ -14,6 +14,31 @@ function layout(w,h,allowTurn=true) {
 }
 const at=([x,y])=>[x,y];
 
+// Reference points on the 2048×1152 paintings: solid protruding lower-right
+// boulder, neighbouring clear water, and water previously covered by a rock ellipse.
+const shoreReferences={
+  spring:{dry:[1350,940],water:[[1280,920],[1008,990],[100,510]]},
+  summer:{dry:[1360,900],water:[[1250,910],[1008,1095],[100,530]]},
+  autumn:{dry:[1270,1010],water:[[1190,990],[1450,775],[100,470]]},
+  winter:{dry:[1270,950],water:[[1200,930],[1590,800],[100,445]]}
+};
+for(const [season,ref] of Object.entries(shoreReferences))test(`${season}：凸出的岸石与清水参考点在横屏、竖屏、双屏保持同一岸线`,()=>{
+  const map=core.POND_MAPS[season];
+  for(const [w,h,mode]of [[1280,720,'auto'],[390,844,'auto'],[2560,720,'dual']]){
+    const bed=fitBed(7680,4320,w,h,true,mode),transform=(x,y)=>bedToScreen(bed,x/map.width,y/map.height,w,h);
+    const screen=([x,y])=>transform(x*1.25,y*1.25);
+    const signed=p=>{
+      const [x,y]=screen(p);
+      // Move the reference and all contours into a padded viewport: a dual-screen
+      // crop may hide a point, but must not change the artwork's water classification.
+      const padded=new PondHabitat(10000,10000,(ix,iy)=>{const [px,py]=transform(ix,iy);return [px+4000,py+4000];},map);
+      return padded.sample(x+4000,y+4000).distance;
+    };
+    assert.ok(signed(ref.dry)<0,'出水岸石不能再接受水层或投喂');
+    for(const p of ref.water)assert.ok(signed(p)>0,`清水 ${p} 不应被粗略椭圆遮住`);
+  }
+});
+
 function bankEncounter({fps=60,speed=1,angle=0,corner=false,rock=false,seconds=1}={}) {
   const w=1000,h=700,f=createFish(0,()=>.5);
   Object.assign(f,{size:1,baseSize:1,x:rock?.36599:.91599,y:corner?.87999:.5,angle});

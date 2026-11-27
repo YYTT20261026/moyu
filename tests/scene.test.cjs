@@ -48,6 +48,26 @@ test('底图像素回读被宿主拒绝时保留岸线遮罩，不中断换季',
   assert.equal(warnings,4);
 });
 
+for(const season of ['spring','summer','autumn','winter'])test(`${season}：水层只使用共用岸线和石头多边形，不叠加石头椭圆`,()=>{
+  for(const [w,h] of [[2560,1440],[7680,4320]]){
+    const fills=[],ellipses=[];let points=[];
+    const ctx={beginPath(){points=[];},moveTo(x,y){points.push([x,y]);},lineTo(x,y){points.push([x,y]);},closePath(){},fillRect(){},
+      fill(){fills.push({op:this.globalCompositeOperation,points:points.map(p=>[...p])});},ellipse(...args){ellipses.push(args);}};
+    const context={window:{PondCore:core,PondArt:{}},document:{createElement(){return {width:1,height:1,getContext(){return ctx;}};}}};
+    vm.runInNewContext(fs.readFileSync(require.resolve('../scene.js'),'utf8'),context);
+    const mask=context.window.PondScene.floatMask(w,h,season),map=core.POND_MAPS[season];
+    assert.equal(fills[0].op,'destination-out','沿真实水线挖出水层');
+    for(const [index,poly]of [map.water,...map.rocks].entries()){
+      assert.equal(fills[index].points.length,poly.length);
+      fills[index].points.forEach(([x,y],i)=>{
+        assert.ok(Math.abs(x/mask.width-poly[i][0])<1e-12);
+        assert.ok(Math.abs(y/mask.height-poly[i][1])<1e-12);
+      });
+    }
+    assert.equal(ellipses.length,season==='spring'?8:0,'石头天气效果的椭圆不能成为新的水域边界');
+  }
+});
+
 // A stand-in renderer: the painting maps 1:1 onto a 1672×941 screen.
 function pond(seed = 7) {
   let s = seed; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -71,9 +91,14 @@ test('云量：晴天偶有云影，多云约半池云影，雨天满天阴云',
 
 test('雨点打在荷叶、花苞上会溅起水花并让它们颤动，雨停后回稳', () => {
   const scene = pond();
+  // Hit a movable flower explicitly: changing the shore changes rain's RNG
+  // consumption; a three-second area-weighted sample can legitimately hit only rocks.
+  const flower=scene.floaters.find(fl=>fl.f[3]!=='r');
+  scene.hit(flower,.9);scene.update(1/30,{...base,weather:'rain'});
+  assert.ok(scene.splashes.some(p=>p.leaf),'直接雨滴命中生成水花');
+  assert.ok(Math.abs(flower.ja)+Math.abs(flower.ox)+Math.abs(flower.oy)>0,'雨滴冲量确实传到花叶');
   for (let i = 0; i < 90; i++) scene.update(1 / 30, { ...base, weather: 'rain' });
-  assert.ok(scene.splashes.some(p => p.leaf), '荷叶上有雨滴水花');
-  assert.ok(scene.floaters.some(f => f.ja !== 0 || f.ox !== 0), '有荷叶或花苞被雨点碰动');
+  assert.ok(scene.splashes.some(p => p.leaf), '持续降雨中仍有落在物体上的水花');
   for (let i = 0; i < 600; i++) scene.update(1 / 30, { ...base, weather: 'sunny' });
   assert.ok(scene.floaters.every(f => Math.abs(f.ja) < .01 && Math.abs(f.ox) < .05 && Math.abs(f.oy) < .05));
   assert.equal(scene.splashes.length, 0);

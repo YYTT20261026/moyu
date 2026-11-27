@@ -13,6 +13,8 @@ native/windows/obj/
 .build-tools/
 .manus/
 .work/
+.workbuddy/
+.workbuddy-ai/
 node_modules/
 debug.log
 .DS_Store

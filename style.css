@@ -1,6 +1,6 @@
 :root{font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#344b40;font-synthesis:none;--paper:#f6f4e8;--ink:#344b40;--muted:#879184;--line:#d9ddcd;--accent:#577363;--rust:#ac634b}
 *{box-sizing:border-box}body{margin:0;overflow:hidden;background:#748d79}button,input,select{font:inherit}button{cursor:pointer}button,input,select{outline-offset:4px}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #577363}button{color:inherit}svg{width:21px;height:21px;display:block;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}button{border:0}#pond{position:fixed;inset:0;isolation:isolate}.pond-bed,.water-tint,.vignette,#world,#labels{position:absolute;inset:0;width:100%;height:100%}#labels{pointer-events:none}
-.gl .pond-bed,.gl .water-tint,.gl .vignette{display:none}.pond-bed{background:#8fa791 url('assets/pond-runtime.png') center/cover no-repeat;filter:saturate(.49) brightness(.96);transition:filter 3s}.water-tint{background:rgba(181,209,184,.14);pointer-events:none;transition:background 3s}.vignette{box-shadow:inset 0 0 150px #17362f40;pointer-events:none}#world{touch-action:none;cursor:crosshair}.ui{transition:opacity .5s,transform .5s}.masthead{position:absolute;left:calc(38px + var(--safe-left,0px));top:calc(34px + var(--safe-top,0px));display:flex;align-items:center;gap:14px;pointer-events:none}.seal{display:grid;place-items:center;width:37px;height:45px;border:1px solid #f3f0db88;color:#f9f4e6;background:#986447ca;font-family:serif;font-size:23px;border-radius:3px;box-shadow:inset 0 0 0 3px #af816e66}.masthead h1{font-family:"Songti SC","Noto Serif SC",SimSun,serif;font-weight:500;font-size:30px;letter-spacing:8px;margin:0 0 6px;text-shadow:0 1px 14px #f6f4dd;color:#2b493b}.masthead p{font-size:8px;letter-spacing:2.4px;margin:0;color:#3d5c48}.weather-card{position:absolute;right:calc(34px + var(--safe-right,0px));top:calc(30px + var(--safe-top,0px));width:280px;padding:16px 18px 14px;border:1px solid #f7f4dd66;border-radius:13px;background:#eef1df8c;box-shadow:0 5px 24px #2e4c3510;backdrop-filter:blur(10px)}.weather-top{display:flex;align-items:center;justify-content:space-between;font-size:11px;letter-spacing:2px}
+.gl .pond-bed,.gl .water-tint,.gl .vignette{display:none}.pond-bed{background:#8fa791 url('assets/pond-runtime.png') center/cover no-repeat;filter:saturate(.49) brightness(.96);transition:filter 3s}.water-tint{background:rgba(181,209,184,.14);pointer-events:none;transition:background 3s}.vignette{box-shadow:inset 0 0 150px #17362f40;pointer-events:none}#world{touch-action:none;cursor:crosshair}.ui{transition:opacity .5s,transform .5s}.masthead{position:absolute;left:calc(38px + var(--safe-left,0px));top:calc(34px + var(--safe-top,0px));display:flex;align-items:center;gap:14px;pointer-events:none}.seal{display:grid;place-items:center;width:37px;height:45px;border:1px solid #f3f0db88;color:#f9f4e6;background:#986447ca;font-family:serif;font-size:23px;border-radius:3px;box-shadow:inset 0 0 0 3px #af816e66}.masthead h1{font-family:"Songti SC","Noto Serif SC",SimSun,serif;font-weight:500;font-size:30px;letter-spacing:8px;margin:0 0 6px;text-shadow:0 1px 14px #f6f4dd;color:#2b493b}.masthead p{font-size:8px;letter-spacing:2.4px;margin:0;color:#3d5c48}.weather-top{display:flex;align-items:center;justify-content:space-between;font-size:11px;letter-spacing:2px}
 /* Every control the card offers now sits along its top edge, one icon each; the place label steps aside. */
 .card-actions{display:flex;align-items:center;justify-content:space-between;width:100%;margin:0 -5px}
 .weather-top #weather-location{display:none}
@@ -52,7 +52,7 @@
 .memorial-list li{display:flex;flex-direction:column;gap:3px;padding:10px 2px;border-bottom:1px solid #e4e7d8}
 .mem-name{font-size:12px;color:#4a5f4a}
 .mem-meta{font-size:9px;color:#909780;letter-spacing:.4px}.fish-thumb canvas{max-width:100%;height:60px}.fish-tile-foot{display:flex;align-items:center;justify-content:space-between;padding:9px;gap:4px}.fish-tile-foot span{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.edit-fish{background:none;color:#8c9880;font-size:9px;padding:2px}.weather-option{display:flex;align-items:center;flex-direction:column;gap:8px;padding:16px 5px}.weather-option svg{width:23px;height:23px}.city-results{display:flex;gap:6px;flex-direction:column;margin-top:8px}.city-result{text-align:left;background:#e7ebde;border-radius:7px;padding:11px;font-size:11px}.weather-info{padding:14px;background:#e7ebde;border-radius:9px;font-size:11px;line-height:1.9;margin-top:16px;color:#6f7e63}.weather-info a{color:inherit}.setting-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 0;border-bottom:1px solid #dce0d2;font-size:12px}.setting-row small{display:block;font-size:10px;margin-top:5px;color:#949c87}.setting-row input[type=range]{max-width:140px}.setting-row select{max-width:120px}.dialog-footer{margin-top:21px;font-size:10px;color:#99a28f;line-height:1.9}.snow .pond-bed{filter:saturate(.30) brightness(1.04)}.snow .water-tint{background:#d6e6e43b}.rain .pond-bed{filter:saturate(.45) brightness(.78)}.rain .water-tint{background:#405f711f}.cloudy .pond-bed{filter:saturate(.49) brightness(.88)}.night .pond-bed{filter:saturate(.51) brightness(.43)}.night .water-tint{background:#123a684f}.night .masthead h1,.night .masthead p,.night .verse{color:#d2ddca}.night .weather-card{background:#d9e2da9c}body.reduced-motion .ui{transition:none}
-.masthead{padding:13px 18px 13px 13px;border:1px solid #faf8e23d;background:#eef1df85;border-radius:10px;backdrop-filter:blur(12px)}.masthead p{color:#50684f}.verse{color:#f6f4dbd9;text-shadow:0 1px 5px #2f443c}.verse>span{text-shadow:0 1px 5px #2f443c}.verse i{color:#f0dbca;background:#7e503d73;border-color:#ead3b675}dialog{padding:0;scrollbar-width:thin;scrollbar-color:#aab6a3 transparent}.panel-header{position:sticky;top:0;z-index:2;background:#f6f4ea;padding:24px 26px 18px;margin:0;border-bottom:1px solid #d9ddcd66}#panel-content{padding:20px 26px 26px}.fish-preview canvas{height:135px}.fish-grid{max-height:215px;scrollbar-width:thin;scrollbar-color:#adb8a5 transparent}@media(max-width:1000px){.pond-meta{top:calc(24px + var(--safe-top,0px));right:calc(24px + var(--safe-right,0px))}.masthead{left:calc(26px + var(--safe-left,0px));top:calc(26px + var(--safe-top,0px))}.weather-card{right:calc(24px + var(--safe-right,0px));top:calc(24px + var(--safe-top,0px))}.verse{left:calc(30px + var(--safe-left,0px))}}@media(max-width:600px){.masthead{left:calc(20px + var(--safe-left,0px));top:calc(24px + var(--safe-top,0px));gap:9px;padding:10px 12px}.masthead h1{font-size:24px;letter-spacing:5px}.masthead p{font-size:6px;letter-spacing:1.4px}.seal{width:29px;height:36px;font-size:20px}.weather-card{top:calc(16px + var(--safe-top,0px));right:calc(16px + var(--safe-right,0px));width:252px;padding:12px 14px;border-radius:13px}.weather-top{font-size:9px;letter-spacing:1px}#clock{font-size:33px}#calendar{font-size:8px;letter-spacing:0;margin-bottom:12px}.weather-foot{font-size:8px;letter-spacing:0;padding-top:10px;margin-top:11px}.weather-line{gap:5px}.weather-line strong{font-size:10px}.weather-line>span:last-child{font-size:9px}.weather-line svg{width:17px}.verse{top:34%;left:calc(22px + var(--safe-left,0px))}.verse>span{font-size:13px;letter-spacing:6px}.verse i{display:none}.pond-meta{top:calc(6px + var(--safe-top,0px));right:calc(16px + var(--safe-right,0px));font-size:9px;gap:7px}.pond-meta .meta-divider,.pond-meta #fed-count{display:none}dialog{max-height:calc(100dvh - 32px)}.panel-header{padding:20px}.panel-header h2{font-size:23px}#panel-content{padding:17px 20px 22px}.fish-grid{grid-template-columns:repeat(3,1fr)}#toast{top:calc(93px + var(--safe-top,0px));font-size:11px;width:max-content}.weather-options{gap:5px}.form-row{gap:8px}.form-row label{min-width:48px}.palette{gap:7px}.swatch{width:21px;height:21px}.form-row #palette-name{display:none}}
+.masthead{padding:13px 18px 13px 13px;border:1px solid #faf8e23d;background:#eef1df85;border-radius:10px;backdrop-filter:blur(12px)}.masthead p{color:#50684f}.verse{color:#f6f4dbd9;text-shadow:0 1px 5px #2f443c}.verse>span{text-shadow:0 1px 5px #2f443c}.verse i{color:#f0dbca;background:#7e503d73;border-color:#ead3b675}dialog{padding:0;scrollbar-width:thin;scrollbar-color:#aab6a3 transparent}.panel-header{position:sticky;top:0;z-index:2;background:#f6f4ea;padding:24px 26px 18px;margin:0;border-bottom:1px solid #d9ddcd66}#panel-content{padding:20px 26px 26px}.fish-preview canvas{height:135px}.fish-grid{max-height:215px;scrollbar-width:thin;scrollbar-color:#adb8a5 transparent}@media(max-width:1000px){.pond-meta{top:calc(24px + var(--safe-top,0px));right:calc(24px + var(--safe-right,0px))}.masthead{left:calc(26px + var(--safe-left,0px));top:calc(26px + var(--safe-top,0px))}.verse{left:calc(30px + var(--safe-left,0px))}}@media(max-width:600px){.masthead{left:calc(20px + var(--safe-left,0px));top:calc(24px + var(--safe-top,0px));gap:9px;padding:10px 12px}.masthead h1{font-size:24px;letter-spacing:5px}.masthead p{font-size:6px;letter-spacing:1.4px}.seal{width:29px;height:36px;font-size:20px}.weather-top{font-size:9px;letter-spacing:1px}#clock{font-size:33px}#calendar{font-size:8px;letter-spacing:0;margin-bottom:12px}.weather-foot{font-size:8px;letter-spacing:0;padding-top:10px;margin-top:11px}.weather-line{gap:5px}.weather-line strong{font-size:10px}.weather-line>span:last-child{font-size:9px}.weather-line svg{width:17px}.verse{top:34%;left:calc(22px + var(--safe-left,0px))}.verse>span{font-size:13px;letter-spacing:6px}.verse i{display:none}.pond-meta{top:calc(6px + var(--safe-top,0px));right:calc(16px + var(--safe-right,0px));font-size:9px;gap:7px}.pond-meta .meta-divider,.pond-meta #fed-count{display:none}dialog{max-height:calc(100dvh - 32px)}.panel-header{padding:20px}.panel-header h2{font-size:23px}#panel-content{padding:17px 20px 22px}.fish-grid{grid-template-columns:repeat(3,1fr)}#toast{top:calc(93px + var(--safe-top,0px));font-size:11px;width:max-content}.weather-options{gap:5px}.form-row{gap:8px}.form-row label{min-width:48px}.palette{gap:7px}.swatch{width:21px;height:21px}.form-row #palette-name{display:none}}
 @media(max-width:370px){.form-actions{align-items:flex-end}.form-actions .small-note{max-width:140px}.fish-grid{grid-template-columns:repeat(2,1fr)}}
 
 .paint-tools{gap:10px}.paint-tools input[type=color]{width:24px;height:24px;padding:1px;border:1px solid #cbd4c0;border-radius:50%;background:none;cursor:pointer;margin-left:auto}.paint-tools .small-note{font-size:9px}#preview{touch-action:none}
@@ -66,12 +66,65 @@
 .season-label{font-size:10px;color:#5e735d;letter-spacing:1.3px;margin:-9px 0 13px}.season-heading{margin-top:0}.season-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.season-option{position:relative;padding:0 0 10px;border:1px solid #d9dfce;border-radius:10px;background:#fcfbf4;overflow:hidden;transition:box-shadow .2s,border-color .2s}.season-option img{display:block;width:100%;height:64px;object-fit:cover}.season-option>span{display:block;margin:8px 0 4px;font:500 18px "Songti SC",SimSun,serif;letter-spacing:2px}.season-option small{font-size:9px;color:#7c8974}.season-option:hover{border-color:#9ba98d}.season-option.selected{border-color:#59715a;background:#e3e9d9;box-shadow:0 0 0 1px #59715a}.season-option.selected::after{content:'✓';position:absolute;right:5px;top:5px;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#526e5e;color:#fff;font-size:11px}.season-note{margin:11px 0 21px}@media(max-width:600px){.season-label{font-size:9px;letter-spacing:.6px;margin:-4px 0 10px}.season-options{gap:6px}.season-option img{height:49px}.season-option>span{font-size:16px}.season-option small{font-size:8px}}
 
 /* Time, weather and pond controls share one quiet corner of the painting. */
+/* The corner card is one box with two faces. At rest it is a capsule carrying the clock, the weather
+   and the koi count; opened, it is the full card again. Only the box itself animates — width, height
+   and border-radius — while both faces cross-fade inside it, so the capsule reads as growing into the
+   card instead of being swapped for it. The box is anchored at its top-right corner, the corner the
+   capsule sits in, so it unfolds down and to the left out of the button it came from. */
+#pond {
+  --card-w:280px;
+  --card-pad:16px 18px 14px;
+  --card-r:13px;
+  --pill-w:248px;
+  --pill-h:48px;
+  --pill-r:24px;
+  --corner-top:calc(30px + var(--safe-top,0px));
+  --corner-right:calc(34px + var(--safe-right,0px));
+  /* A little overshoot on the way out, so the card settles into its size instead of stopping dead. */
+  --ease-grow:cubic-bezier(.3,1.14,.42,1);
+  --ease-fold:cubic-bezier(.44,0,.24,1);
+}
 .weather-card {
+  position:absolute;
+  right:var(--corner-right);
+  top:var(--corner-top);
+  width:var(--card-w);
+  /* Measured from the open face by app.js: a box cannot animate to "auto". */
+  height:var(--card-h,300px);
   max-width:calc(100vw - 32px - var(--safe-left,0px) - var(--safe-right,0px));
-  max-height:calc(100dvh - 60px - var(--safe-top,0px) - var(--safe-bottom,0px) - var(--dock-inset,0px));
+  max-height:var(--card-h-limit,none);
+  border:1px solid #f7f4dd66;
+  border-radius:var(--card-r);
+  background:#eef1df8c;
+  box-shadow:0 5px 24px #2e4c3510;
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  transform-origin:100% 0;
+  /* Both faces are clipped by the box while it changes shape, so nothing spills at the corners. */
+  overflow:hidden;
+  transition:
+    width .46s var(--ease-grow),
+    height .46s var(--ease-grow),
+    border-radius .46s var(--ease-grow),
+    background-color .3s ease,
+    box-shadow .46s var(--ease-grow),
+    backdrop-filter 0s linear;
+}
+/* The open face: the card exactly as it was, padding and all, laid out at the full width so the
+   words do not re-wrap while the box narrows. */
+.card-body {
+  position:absolute;
+  top:0;
+  right:0;
+  width:var(--card-w);
+  padding:var(--card-pad);
+  max-height:var(--card-h-limit,none);
   overflow:auto;
   scrollbar-width:thin;
   scrollbar-color:#aab6a3 transparent;
+  opacity:1;
+  visibility:visible;
+  transition:opacity .26s ease .1s, visibility 0s linear;
 }
 .weather-card .weather-top {min-height:32px}
 .weather-card .weather-top .icon-button {width:36px;height:36px;margin:-4px -6px -4px 0}
@@ -108,33 +161,175 @@
 .dock-button:hover {background:#f7f8eda6}
 .dock-button.active {background:#58715c;color:#fffef1;box-shadow:0 3px 8px #44584020}
 .weather-card .pond-hint {margin:12px 0 0;text-align:center;font-size:9px;line-height:1.6;letter-spacing:.5px;color:#687d66}
+
+/* The folded face. Three readings and one way back out, each a finger-sized target: the clock (which
+   opens the card), the weather and the koi count (which go straight to their own panels), and the
+   chevron. */
+.card-pill {
+  position:absolute;
+  top:0;
+  right:0;
+  width:var(--pill-w);
+  height:var(--pill-h);
+  display:grid;
+  grid-template-columns:auto 1fr 1fr auto;
+  align-items:center;
+  padding:0 2px 0 12px;
+  transform-origin:100% 0;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:scale(.9);
+  transition:opacity .16s ease, visibility 0s linear .16s, transform .3s var(--ease-fold);
+}
+.pill-cell {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  height:44px;
+  min-width:44px;
+  padding:0 7px;
+  border-radius:14px;
+  background:transparent;
+  color:#4d6553;
+  font-size:11px;
+  letter-spacing:.4px;
+  white-space:nowrap;
+  transition:background .18s ease,color .18s ease;
+}
+.pill-cell:hover {background:#536b4614}
+.pill-cell:active {background:#536b4626}
+.pill-cell:focus-visible {outline:2px solid #577363;outline-offset:-2px}
+/* A hairline between the three readings, the way the card's own rules divide it. */
+.pill-weather,.pill-fish {justify-self:stretch;box-shadow:inset 1px 0 #7283652b}
+.pill-cell svg {width:15px;height:15px;color:#617a67}
+.pill-cell [data-icon] {display:grid;place-items:center}
+.pill-clock {justify-self:start;padding:0 4px 0 2px;font-size:13.5px;letter-spacing:1.2px;font-weight:500;font-variant-numeric:tabular-nums;color:#3f564a}
+.pill-expand {
+  justify-self:end;
+  display:grid;
+  place-items:center;
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  background:transparent;
+  color:#5a705f;
+  transition:background .18s ease,color .18s ease,transform .2s var(--ease-fold);
+}
+.pill-expand:hover {background:#536b4618;color:#3a4f40}
+.pill-expand:focus-visible {outline:2px solid #577363;outline-offset:-3px}
+.pill-expand svg {width:18px;height:18px}
+
+/* Folded: the box becomes the capsule. The fall is quicker and has no bounce — going small should feel
+   like a button being pressed, not a door swinging. */
+.weather-card.collapsed {
+  width:var(--pill-w);
+  height:var(--pill-h);
+  border-radius:var(--pill-r);
+  background:#eef1dfef;
+  box-shadow:0 3px 14px #2e4c3514;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  /* The blur is only worth its cost while the card is big, and a 248×48 capsule over water does not
+     show the difference. It leaves once the shape has settled, so the material never visibly snaps. */
+  transition:
+    width .34s var(--ease-fold),
+    height .34s var(--ease-fold),
+    border-radius .34s var(--ease-fold),
+    background-color .3s ease,
+    box-shadow .34s var(--ease-fold),
+    backdrop-filter 0s linear .34s;
+}
+.weather-card.collapsed .card-pill {
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+  transform:scale(1);
+  transition:opacity .22s ease .12s, visibility 0s linear, transform .34s var(--ease-grow);
+}
+.weather-card.collapsed .card-body {
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:translateY(-4px);
+  transition:opacity .16s ease, visibility 0s linear .16s;
+}
+.night .weather-card.collapsed {background:#d9e2daef}
+
+/* An idle fold says so gently: the capsule arrives on a breath instead of blinking into place, and a
+   small line under it points at the way back for a few seconds. */
+@keyframes pill-arrive {
+  from {opacity:0;transform:scale(.9)}
+  to {opacity:1;transform:scale(1)}
+}
+.weather-card.auto-fold .card-pill {animation:pill-arrive .5s var(--ease-grow) both}
+.card-tip {
+  position:absolute;
+  top:calc(var(--corner-top) + var(--pill-h) + 10px);
+  right:var(--corner-right);
+  padding:6px 11px;
+  border-radius:9px;
+  background:#f5f3e6e6;
+  box-shadow:0 4px 16px #2643341f;
+  color:#5d7159;
+  font-size:10px;
+  letter-spacing:.6px;
+  white-space:nowrap;
+  pointer-events:none;
+  opacity:0;
+  transform:translateY(-4px);
+  transition:opacity .3s ease,transform .3s var(--ease-fold);
+}
+.card-tip.visible {opacity:1;transform:none}
+/* A small notch points up at the chevron, so the line reads as part of the capsule and not as a
+   stray label floating on the pond. */
+.card-tip::before {
+  content:'';
+  position:absolute;
+  top:-4px;
+  right:22px;
+  width:0;
+  height:0;
+  border-left:4.5px solid transparent;
+  border-right:4.5px solid transparent;
+  border-bottom:4.5px solid #f5f3e6e6;
+}
+.zen .card-tip,.wallpaper .card-tip {display:none}
+/* Folded, the capsule says the koi count itself; the meta line above it would only repeat the number
+   and, on a phone, sit on the capsule's top edge. It fades rather than vanishes so the fold reads as
+   one movement. */
+body.card-folded .pond-meta {opacity:0;transform:translateY(-6px);pointer-events:none}
+
+@media(max-width:1000px) {
+  #pond {--corner-top:calc(24px + var(--safe-top,0px));--corner-right:calc(24px + var(--safe-right,0px))}
+}
 @media(max-width:600px) {
-  .weather-card {max-height:calc(100dvh - 32px - var(--safe-top,0px) - var(--safe-bottom,0px) - var(--dock-inset,0px))}
+  #pond {
+    --card-w:252px;
+    --card-pad:12px 14px;
+    --pill-w:228px;
+    --corner-top:calc(16px + var(--safe-top,0px));
+    --corner-right:calc(16px + var(--safe-right,0px));
+  }
+  .card-pill {padding:0 2px 0 8px}
+  .pill-cell {padding:0 5px;font-size:10.5px}
+  .pill-clock {font-size:12.5px}
   .weather-card .weather-top {font-size:10px;min-height:36px}
   .weather-card .weather-top .icon-button {width:44px;height:44px;margin:-4px -8px -4px 0}
   .weather-card .dock {margin-top:11px;padding-top:10px}
   .dock-button {min-height:52px}
 }
 @media(max-height:500px) {
-  .weather-card {top:calc(12px + var(--safe-top,0px));max-height:calc(100dvh - 24px - var(--safe-top,0px) - var(--safe-bottom,0px) - var(--dock-inset,0px))}
+  #pond {--corner-top:calc(12px + var(--safe-top,0px))}
 }
-
-/* Folded: the corner card shrinks to a single round icon; tapping it brings the card back. */
-.weather-card.collapsed {
-  width:46px;height:46px;padding:0;border-radius:50%;
-  display:grid;place-items:center;overflow:hidden;
+/* Reduced motion keeps the two faces, but gets there at once. The folded rules are more specific
+   than a plain .weather-card, so the switch has to be spelled out to reach them. */
+@media(prefers-reduced-motion:reduce) {
+  .weather-card,.card-pill,.card-body,.card-tip {transition-duration:.01ms!important;transition-delay:0s!important}
+  .weather-card.auto-fold .card-pill {animation:none}
 }
-.weather-card.collapsed #clock,
-.weather-card.collapsed #calendar,
-.weather-card.collapsed .season-label,
-.weather-card.collapsed .weather-line,
-.weather-card.collapsed .weather-foot,
-.weather-card.collapsed .dock,
-.weather-card.collapsed .pond-hint {display:none}
-.weather-card.collapsed .weather-top {min-height:0;margin:0;padding:0;border:0;width:auto;justify-content:center}
-.weather-card.collapsed .card-actions {width:auto;margin:0;gap:0;justify-content:center}
-.weather-card.collapsed .card-actions > .icon-button {display:none}
-.weather-card.collapsed .card-actions > #card-toggle {display:grid;width:38px;height:38px;margin:0}
+body.reduced-motion .weather-card,body.reduced-motion .card-pill,body.reduced-motion .card-body,body.reduced-motion .card-tip {transition:none!important}
 
 /* ?mode=panel: the small window above the desktop icons shows one panel and nothing else. */
 body.panel-only {background:#f6f4ea}
@@ -150,3 +345,7 @@ body.panel-only .panel-header {position:sticky; top:0; z-index:2; background:#f6
 /* Size sits beside the close button, but only in the panel's own window; the close button is always there. */
 .panel-actions {display:flex; align-items:center; gap:2px}
 body:not(.panel-only) .panel-actions > :not(.close-panel) {display:none}
+/* A failed weather sync keeps its own way back, directly under the line that says what went wrong. */
+.weather-retry-row {display:flex; justify-content:flex-end; margin-top:8px}
+.weather-retry-row #weather-retry {font-size:10px; color:#66785f; padding:4px 7px; border-radius:6px; letter-spacing:.3px}
+.weather-retry-row #weather-retry:hover {color:#3f5640; background:#e7ebde}

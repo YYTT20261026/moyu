@@ -123,7 +123,7 @@
       const vol = (v, d) => Number.isFinite(Number(v)) ? unit(v) : d;
       const previousScene = this.scene, previousWeatherSound = this.opts.weatherSound;
       this.opts = { water: settings.water !== false, waterType: 'lapping', waterVol: vol(settings.waterVol, NATURE_DEFAULTS.waterVol), weatherSound: settings.weatherSound !== false, weatherVol: vol(settings.weatherVol, NATURE_DEFAULTS.weatherVol), music: 'off', musicVol: 0, sfx: settings.sfx !== false, volume: vol(settings.volume, NATURE_DEFAULTS.volume) };
-      this.scene = { season: Object.hasOwn(SEASON_SOUNDS, settings.season) ? settings.season : 'spring', weather: settings.weather, night: !!settings.night, rain: vol(settings.rainAmount, .5) };
+      this.scene = { season: Object.prototype.hasOwnProperty.call(SEASON_SOUNDS, settings.season) ? settings.season : 'spring', weather: settings.weather, night: !!settings.night, rain: vol(settings.rainAmount, .5) };
       if (this.scene.season !== previousScene.season || this.scene.weather !== previousScene.weather || this.scene.night !== previousScene.night || this.opts.weatherSound !== previousWeatherSound) this.events = {};
       if (!this.context) return;
       const now = this.context.currentTime, o = this.opts;

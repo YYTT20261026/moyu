@@ -320,13 +320,18 @@ namespace BichiPond
             }
         }
 
-        private void TapIfDesktop(Native.POINT pt)
-        {
-            DebugLog.Write($"click at {pt.X},{pt.Y} under={Native.ClassOf(Native.WindowFromPoint(pt)) ?? "?"}");
-            if (!IsDesktopPoint(pt)) return;
-            var p = new Point(pt.X, pt.Y);
-            walls.FirstOrDefault(w => w.ScreenBounds.Contains(p))?.Tap(p);
-        }
+    private void TapIfDesktop(Native.POINT pt)
+    {
+        IntPtr under = Native.WindowFromPoint(pt);
+        string underClass = Native.ClassOf(under);
+        // A tap on the desktop's icon layer reaches the whole pond. One that landed through a see-through window
+        // lying over it (a desktop clock, a date widget) reaches the card's controls only.
+        bool desktop = IsDesktopLayer(under, underClass), overlay = !desktop && IsOverlay(under);
+        DebugLog.Write($"click at {pt.X},{pt.Y} under={underClass ?? "?"}{(desktop ? "" : overlay ? " through an overlay" : " not the desktop")}");
+        if (!desktop && !overlay) return;
+        var p = new Point(pt.X, pt.Y);
+        walls.FirstOrDefault(w => w.ScreenBounds.Contains(p))?.Tap(p, !desktop);
+    }
 
         // Held still on the desktop: scatter a handful of food.
         private void HoldTick(object sender, EventArgs e)
@@ -355,13 +360,46 @@ namespace BichiPond
         // What is under the pointer when the desktop itself is in front. A drag or a right click never reaches
         // here on purpose: those belong to Explorer (icon selection, its context menu) and taking them would
         // break the desktop.
-        private static bool IsDesktopPoint(Native.POINT pt)
+    private static bool IsDesktopPoint(Native.POINT pt)
+    {
+        IntPtr under = Native.WindowFromPoint(pt);
+        return IsDesktopLayer(under, Native.ClassOf(under));
+    }
+
+    private static bool IsDesktopLayer(IntPtr under, string c)
+    {
+        return c == "SHELLDLL_DefView" || c == "WorkerW" || c == "Progman"
+            || c == "SysListView32" && Native.ClassOf(Native.GetParent(under)) == "SHELLDLL_DefView";
+    }
+
+    /// <summary>True when <paramref name="under"/> (the window a tap landed on) is a see-through window drawn over
+    /// the desktop: a desktop clock, a date widget, anything floated over the wallpaper. Such a window takes the
+    /// click itself, so the tap is not one on the icon layer, yet the card's buttons are in plain sight beneath
+    /// it and that is what was aimed at. Only a window made to overlay others counts — a layered window that is
+    /// not one uniform, fully opaque sheet. A plain application window never does: it hides the card, and a tap
+    /// on it belongs to it alone. Our own windows are left out too, or a click inside the open panel would land
+    /// on the card it covers.</summary>
+    private static bool IsOverlay(IntPtr under)
+    {
+        if (under == IntPtr.Zero) return false;
+        IntPtr root = Native.GetAncestor(under, Native.GA_ROOT);
+        if (root == IntPtr.Zero) root = under;
+        if (IsOurs(root)) return false;
+        for (IntPtr w = under; w != IntPtr.Zero; w = Native.GetParent(w))
         {
-            IntPtr under = Native.WindowFromPoint(pt);
-            string c = Native.ClassOf(under);
-            return c == "SHELLDLL_DefView" || c == "WorkerW" || c == "Progman"
-                || c == "SysListView32" && Native.ClassOf(Native.GetParent(under)) == "SHELLDLL_DefView";
+            long ex = Native.GetWindowLongPtr(w, Native.GWL_EXSTYLE).ToInt64();
+            if ((ex & Native.WS_EX_LAYERED) != 0 && !FullyOpaque(w)) return true;
+            if (w == root) break;
         }
+        return false;
+    }
+
+    /// <summary>A layered window with one uniform alpha of 100% and no colour key hides everything under it.</summary>
+    private static bool FullyOpaque(IntPtr w)
+    {
+        return Native.GetLayeredWindowAttributes(w, out uint key, out byte alpha, out uint flags)
+            && (flags & Native.LWA_ALPHA) != 0 && (flags & Native.LWA_COLORKEY) == 0 && alpha == 255;
+    }
 
         private void DismissPanel(Native.POINT pt)
         {

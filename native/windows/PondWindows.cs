@@ -191,11 +191,12 @@ namespace BichiPond
 
         /// <summary>A tap at a screen point (device px) on this screen's desktop. The point goes to the page
         /// unconverted: the page knows its own pixel ratio, while this window's DPI reading is unreliable
-        /// once the window has been parented into the desktop.</summary>
-        public void Tap(Point screenPoint)
+        /// once the window has been parented into the desktop. <paramref name="controlsOnly"/> is a tap that
+        /// landed through a window lying over the card: the page offers it to the card's controls and nothing else.</summary>
+        public void Tap(Point screenPoint, bool controlsOnly = false)
         {
-            DebugLog.Write($"sending tap to {DeviceName} at {screenPoint.X},{screenPoint.Y}");
-            Send("pondTapDevice", screenPoint);
+            DebugLog.Write($"sending tap to {DeviceName} at {screenPoint.X},{screenPoint.Y}{(controlsOnly ? " (card controls only)" : "")}");
+            Send("pondTapDevice", screenPoint, controlsOnly);
         }
 
         /// <summary>Held still: scatter a handful of food (or stir a big ring, in watching mode).</summary>
@@ -204,11 +205,12 @@ namespace BichiPond
         /// <summary>Two quick taps: frighten the koi away.</summary>
         public void DoubleTap(Point screenPoint) => Send("pondDoubleTapDevice", screenPoint);
 
-        private void Send(string method, Point screenPoint)
+        private void Send(string method, Point screenPoint, bool controlsOnly = false)
         {
             if (View?.CoreWebView2 == null) return;
             double x = screenPoint.X - ScreenBounds.Left, y = screenPoint.Y - ScreenBounds.Top;
-            _ = View.CoreWebView2.ExecuteScriptAsync(FormattableString.Invariant($"window.{method}&&{method}({x:0.#},{y:0.#})"));
+            string only = controlsOnly ? ",true" : "";
+            _ = View.CoreWebView2.ExecuteScriptAsync(FormattableString.Invariant($"window.{method}&&{method}({x:0.#},{y:0.#}){only}"));
         }
     }
 

@@ -229,7 +229,13 @@ void main(){
   vec4 sf = texture(uSurface, vUv);
   vec2 g = (sf.rg - .5) * 4.;
   vec3 N = normalize(vec3(-g, 1.));
-  vec3 col = texture(uScene, clamp(vUv + N.xy * uRefract / uView, .001, .999)).rgb;
+  vec2 offset = N.xy * uRefract / uView;
+  // Do not pull a blurred copy of the dry bank into the water. Check the path
+  // as well as its endpoint (thin rocks/concave banks can lie between them).
+  float crossed = max(texture(uFloat, bedUv(clamp(vUv + offset, .001, .999))).r,
+                      texture(uFloat, bedUv(clamp(vUv + offset * .5, .001, .999))).r);
+  offset *= 1. - smoothstep(.02, .35, crossed);
+  vec3 col = texture(uScene, clamp(vUv + offset, .001, .999)).rgb;
   float cloud = texture(uCloud, vUv).r, dim = cloud * uCloudShade;
   // Facets tilted toward the sun read lighter, the far side of each ripple darker; the sun side only counts in sunshine.
   col *= (1. - dim) * (1. + dot(-g, normalize(uSun.xy)) * uShade * (1. - cloud * .6));
@@ -306,12 +312,15 @@ void main(){
 
   const FS_FLOAT = `#version 300 es
 precision highp float;
-uniform sampler2D uBed, uSurface, uNoise, uCloud; uniform vec2 uView;
+uniform sampler2D uBed, uSurface, uNoise, uCloud, uFloat; uniform vec2 uView;
 uniform float uBright, uSat, uVignette, uShade, uSnow, uSkyK, uWet, uRain, uTime, uCloudShade, uMist, uFlash; uniform vec3 uTint, uSky;
 in vec2 vUv; in vec2 vLocal; in vec2 vScreen; in vec2 vTilt; in float vSnowK; in float vWet; in float vPool; in float vSeed; out vec4 o;
 ${MIST}
 void main(){
   float e = length(vLocal), a = 1. - smoothstep(1. - fwidth(e) * 1.6, 1., e), snow = uSnow * vSnowK;
+  // A stone's ellipse bounds its weather effect, not its silhouette. Clip it to
+  // the shared dry-land mask, so this later pass cannot paint over open water.
+  if (vWet < .05) a *= texture(uFloat, vUv).r;
   vec3 c = texture(uBed, vUv).rgb * (1. + uShade * .15);
   // Rain wets whatever it falls on (uWet soaks in fast, dries slowly).
   if (uWet > 0.) {
@@ -729,6 +738,7 @@ void main(){
         gl.uniform1f(p.u('uWet'), env.wetCover || 0); gl.uniform1f(p.u('uRain'), env.rainK || 0); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCloudShade'), env.cloudShade);
         gl.uniform1f(p.u('uMist'), env.mist || 0); gl.uniform1f(p.u('uFlash'), env.flash || 0);
         bindTex(0, bedTex); gl.uniform1i(p.u('uBed'), 0); bindTex(1, state.surface.tex); gl.uniform1i(p.u('uSurface'), 1); bindTex(2, noiseTex); gl.uniform1i(p.u('uNoise'), 2); bindTex(3, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 3);
+        bindTex(4, floatTex); gl.uniform1i(p.u('uFloat'), 4);
         drawElements(batches.floaters);
       }
       // 7. Things on and above the surface.
@@ -898,7 +908,7 @@ void main(){
           }
           queue[l].length = 0;
           if (l === 'under' && floatMask) {
-            foreground ||= foregroundMask(floatMask);
+            if (!foreground) foreground = foregroundMask(floatMask);
             const origin=bedToScreen(state.bed,0,0,state.w,state.h);
             const x=bedToScreen(state.bed,1,0,state.w,state.h),y=bedToScreen(state.bed,0,1,state.w,state.h);
             ctx.save();ctx.globalAlpha=1;ctx.globalCompositeOperation='destination-out';

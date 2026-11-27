@@ -1,6 +1,9 @@
 'use strict';
 const {PALETTES,KOI_SIZE,SEASONS,POND_MAP,weatherFromCode,seasonFromMonth,clamp,createFish,PondSimulation,sanitizeSave,randomSeed,koiAge}=PondCore;
 const $=s=>document.querySelector(s);
+// Object.hasOwn is Chrome 93; the pond still runs on WebViews older than that, so ownership is asked
+// the long way round.
+const has=(object,key)=>Object.prototype.hasOwnProperty.call(object,key);
 // A koi's temperament, shown next to its name on the appetite board (see TEMPER_TRAITS in core.js).
 const TEMPER_LABEL={greedy:'贪',timid:'怯',loner:'独',tame:'亲'};
 const TEMPER_NAME={greedy:'贪吃 · 总第一个冲到食',timid:'胆小 · 一点动静就躲开',loner:'独行 · 喜欢自己待着',tame:'亲人 · 爱凑在鱼群里'};
@@ -19,6 +22,8 @@ const ICONS={
   sound:'M11 4 5 9H2v6h3l6 5V4Z M15 8a6 6 0 0 1 0 8 M18 5a10 10 0 0 1 0 14',
   expand:'M8 3H3v5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5',
   collapse:'M3 8h5V3 M21 8h-5V3 M16 21v-5h5 M8 21v-5H3',
+  // The folded card's way back out: it points the way the card unfolds, down and to the left.
+  'chevron-down':'M5 9l7 7 7-7',
   // Immersive: a frame with a ripple in it — the pond, with everything else put away.
   zen:'M3 5h18v14H3z M6.6 12.5c2.3-2.3 4.8 2.3 7.1 0s3.9-2.3 5.6-.7',
   close:'M6 6l12 12 M18 6 6 18'
@@ -34,7 +39,7 @@ function readSettings(src){for(const key of ['turtles','crabs','butterflies','na
   if(typeof src.cardCollapsed==='boolean')settings.cardCollapsed=src.cardCollapsed;
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
-  if(Object.hasOwn(SEASONS,src.season))settings.season=src.season;
+  if(has(SEASONS,src.season))settings.season=src.season;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
   if(['high','eco'].includes(src.quality))settings.quality=src.quality;
   if(['auto','dual','portrait'].includes(src.displayMode))settings.displayMode=src.displayMode;
@@ -370,7 +375,7 @@ async function syncSeason(){
   }
 }
 function selectSeason(season){
-  if(!Object.hasOwn(SEASONS,season))return;
+  if(!has(SEASONS,season))return;
   settings.season=season;settings.weather=SEASONS[season].weather;settings.autoWeather=false;weatherRequest++;
   applyWeather();scheduleSave();if(activePanel==='weather')updateSeasonOptions();
 }
@@ -398,7 +403,7 @@ async function start(){
   lotusArtworkReady=true;await syncSeason();ensureFrame();
 }
 start();
-function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;}
+function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;const pillFish=$('#pill-fish-text');if(pillFish)pillFish.textContent=`${simulation.fish.length} 尾`;}
 // The koi whose body is under the finger, if any: a tap on her is a fright, not a pellet of food.
 function fishAt(x,y){
   let best=null,bd=Infinity;
@@ -452,47 +457,92 @@ function lanternAt(x,y){
   if(sound.active)sound.tap();
   return true;
 }
-// The corner card folds down to one row, so a tidy desktop can keep it small; the choice is remembered.
+// The corner card is one box with two faces — the capsule at rest, the full card when opened — and the
+// fold is remembered, so a tidy desktop keeps the small size across visits.
 const card=$('.weather-card');
-// Half a minute without a tap, key or scroll folds the card down to its round button. That idle fold
-// lives only on screen: it never overwrites the remembered choice, so tapping the button brings back
-// the size the person picked. An open panel counts as use, not idleness.
+const cardBody=$('.card-body');
+const cardTip=$('#card-tip');
+// A box cannot animate to "auto", so the open face is measured and handed to the stylesheet as
+// --card-h. --card-h-limit is the room the window leaves; a card taller than that scrolls in its box.
+function measureCard(){
+  if(!card||!cardBody)return;
+  const limit=Math.max(160,Math.round(innerHeight-card.offsetTop-24));
+  card.style.setProperty('--card-h-limit',`${limit}px`);
+  const open=Math.min(limit,cardBody.getBoundingClientRect().height);
+  if(open>0)card.style.setProperty('--card-h',`${Math.ceil(open)+2}px`);
+}
+// Half a minute without a tap, key or scroll folds the card down to the capsule. That idle fold lives
+// only on screen: it never overwrites the remembered choice, so the button brings back the size the
+// person picked. An open panel counts as use, not idleness.
 const CARD_IDLE=30000;
-let cardIdleTimer=0,cardFolded=false;
+let cardIdleTimer=0,cardFolded=false,tipTimer=0,arriveTimer=0;
 function armCardIdle(){
   clearTimeout(cardIdleTimer);cardIdleTimer=0;
   if(cardFolded||zen||activePanel||panelMode||document.hidden)return;
   cardIdleTimer=setTimeout(()=>{
     cardIdleTimer=0;
-    if(!cardFolded&&!zen&&!activePanel&&!panelMode&&!document.hidden)setCardCollapsed(true,false);
+    if(!cardFolded&&!zen&&!activePanel&&!panelMode&&!document.hidden){setCardCollapsed(true,false,true);showCardTip();}
   },CARD_IDLE);
 }
 const cardAwake=()=>{if(!cardFolded&&!zen&&!activePanel)armCardIdle();};
 for(const type of ['pointerdown','pointermove','keydown','wheel','touchstart'])addEventListener(type,cardAwake,{passive:true});
-function setCardCollapsed(value,remember=true){
-  cardFolded=!!value;
+// After an idle fold the capsule says how to come back, then the line steps aside on its own.
+function showCardTip(){
+  if(!cardTip)return;
+  cardTip.classList.add('visible');
+  clearTimeout(tipTimer);
+  tipTimer=setTimeout(()=>cardTip.classList.remove('visible'),2800);
+}
+function hideCardTip(){clearTimeout(tipTimer);tipTimer=0;cardTip?.classList.remove('visible');}
+function setCardCollapsed(value,remember=true,auto=false){
+  const folded=!!value,changed=folded!==cardFolded;
+  cardFolded=folded;
   if(remember)settings.cardCollapsed=cardFolded;
   card.classList.toggle('collapsed',cardFolded);
+  // The capsule already carries the koi count, and on a phone the meta line sits right on its top
+  // edge, so the line steps aside while the card is folded.
+  document.body.classList.toggle('card-folded',cardFolded);
+  // The pill's chevron and the card's own corner button are one switch, seen from two sides.
   const button=$('#card-toggle');
   if(button){
-    const name=cardFolded?'expand':'collapse',label=cardFolded?'展开卡片':'收起卡片';
+    const name=cardFolded?'chevron-down':'collapse',label=cardFolded?'展开卡片':'收起卡片';
     button.dataset.icon=name;
     button.innerHTML=icon(name);
     button.setAttribute('aria-label',label);
     button.setAttribute('title',label);
     button.setAttribute('aria-expanded',String(!cardFolded));
   }
+  // An idle fold arrives on a breath; a tap on a button simply folds.
+  clearTimeout(arriveTimer);
+  card.classList.toggle('auto-fold',cardFolded&&auto);
+  if(cardFolded&&auto)arriveTimer=setTimeout(()=>card.classList.remove('auto-fold'),900);
+  if(!cardFolded)hideCardTip();
+  if(changed)measureCard();
   armCardIdle();
 }
 $('#card-toggle').addEventListener('click',()=>{setCardCollapsed(!cardFolded);persist();});
+// Opening is the same move from either door: the chevron, or the clock, which has no panel of its own.
+$('#pill-expand').addEventListener('click',()=>{setCardCollapsed(false);persist();});
+$('#pill-clock').addEventListener('click',()=>{setCardCollapsed(false);persist();});
+// The card is as tall as its content, and the content can change: a longer hint, a city name.
+if('ResizeObserver' in window&&cardBody)new ResizeObserver(measureCard).observe(cardBody);
+addEventListener('resize',measureCard,{passive:true});
 setCardCollapsed(settings.cardCollapsed);
+if(document.fonts?.ready)document.fonts.ready.then(measureCard).catch(()=>{});
 $('#feed-button')?.addEventListener('click',()=>{setFeedMode(!feedMode);persist();toast(feedMode?'投喂已开启，轻点水面试试':'观鱼模式 · 轻点水面，鱼儿会受惊游开');});
-function applyWeather(syncBackground=true){updatePondHint();document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};$('#weather-symbol').innerHTML=icon(settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);if(syncBackground)syncSeason();syncShelters();}
+// The folded card carries the same reading as the open one, in the shortest form that still reads:
+// the temperature when a city is followed, the word for the weather when it is not.
+function syncPillWeather(glyph,label,temperature){
+  const box=$('#pill-weather-icon'),text=$('#pill-weather-text');
+  if(box){box.dataset.icon=glyph;box.innerHTML=icon(glyph);}
+  if(text)text.textContent=temperature.endsWith('°C')?temperature.replace('°C','°'):label;
+}
+function applyWeather(syncBackground=true){updatePondHint();document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};const weatherGlyph=settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather,temperatureText=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-symbol').innerHTML=icon(weatherGlyph);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=temperatureText;syncPillWeather(weatherGlyph,labels[settings.weather],temperatureText);$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);if(syncBackground)syncSeason();syncShelters();}
 // Rain sends the fish under the lotus leaves; any other weather lets them wander again.
 function syncShelters(){if(!scene)return;simulation.setShelters(settings.weather==='rain'?scene.shelterPoints():null);}
 function rainLabel(){return settings.rainAmount<.34?'小雨':settings.rainAmount<.67?'中雨':'大雨';}
 function snowLabel(){return settings.snowAmount<.34?'小雪':settings.snowAmount<.67?'中雪':'大雪';}
-function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();syncAutoNight();}clockTick();setInterval(clockTick,1000);applyWeather();
+function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();const pillTime=$('#pill-time');if(pillTime)pillTime.textContent=$('#clock').textContent;syncAutoNight();}clockTick();setInterval(clockTick,1000);applyWeather();
 const dialog=$('#panel');
 // The Windows host opens the interactive window straight into a panel the wallpaper's card asked for.
 const requestedPanel=new URLSearchParams(location.search).get('panel');
@@ -532,7 +582,7 @@ function syncPreviewTemper(){
 }
 function renderCollection(){  const grid=$('#fish-grid');if(!grid)return; // a koi's own page has no grid
   const week=$('#week-eaten');if(week)week.textContent=`本周池中共吃了 ${weeklyEaten()} 粒`;
-  $('#collection-count').textContent=`/ ${simulation.fish.length} 尾`;if(previewFish)previewFish.temper=createFish(simulation.fish.length).temper;syncPreviewTemper();grid.replaceChildren();for(const f of simulation.fish){const tile=document.createElement('div');tile.className='fish-tile';const thumb=document.createElement('div');thumb.className='fish-thumb';thumb.append(thumbnail(f));
+  $('#collection-count').textContent=`/ ${simulation.fish.length} 尾`;if(previewFish)previewFish.temper=createFish(simulation.fish.length).temper;syncPreviewTemper();while(grid.firstChild)grid.removeChild(grid.firstChild);for(const f of simulation.fish){const tile=document.createElement('div');tile.className='fish-tile';const thumb=document.createElement('div');thumb.className='fish-thumb';thumb.append(thumbnail(f));
 const since=f.lastMeal?Date.now()-f.lastMeal:Infinity;
 const dot=document.createElement('b');dot.className='state-dot';
 dot.dataset.state=since<300000?'fed':since<1800000?'ok':'hungry';
@@ -612,12 +662,236 @@ simulation.fish.splice(i,1);simulation.fish.forEach((g,j)=>{if(j>=i)g.spriteRead
   if($('#fish-grid'))renderCollection();
   else{$('#panel-title').textContent='我的锦鲤';$('#panel-eyebrow').textContent='MEET YOUR LITTLE FRIENDS';renderFish();}
   toast(`「${f.name}」游向了更远的水面`);}
-function renderWeather(){$('#panel-content').innerHTML=`<p class="description">春看繁花，夏听蝉鸣，秋赏红叶，冬候落雪。</p><h3 class="season-heading">池塘四季</h3><div class="season-options" role="group" aria-label="池塘季节">${Object.entries(SEASONS).map(([v,s])=>`<button type="button" class="season-option ${settings.season===v?'selected':''}" data-season="${v}" aria-label="${s.name}季" aria-pressed="${settings.season===v}"><img src="${s.thumbnail}" alt="" decoding="async"/><span>${s.name}</span><small>${s.title}</small></button>`).join('')}</div><p class="small-note season-note" id="season-note" role="status">${pendingSeason?'正在切换景色…':'切换季节会换上对应景色与天气，晴雨仍可单独调整。'}</p><h3>此刻天气</h3><div class="weather-options">${[['sunny','晴日','sun'],['cloudy','多云','cloudy'],['rain','下雨','rain'],['snow','落雪','snow']].map(([v,n,i])=>`<button class="weather-option ${settings.weather===v?'selected':''}" data-weather="${v}" aria-pressed="${settings.weather===v}">${icon(i)}<span>${n}</span></button>`).join('')}</div><div class="setting-row"><div>雨量<small id="rain-note">${rainLabel()} · 下雨时生效，跟随城市天气时自动调整</small></div><input id="rain-amount" type="range" aria-label="雨量" min="0" max="1" step="0.05" value="${settings.rainAmount}"/></div><div class="setting-row"><div>雪量<small id="snow-note">${snowLabel()} · 落雪时生效，岸边会渐渐积雪</small></div><input id="snow-amount" type="range" aria-label="雪量" min="0" max="1" step="0.05" value="${settings.snowAmount}"/></div><div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮；跟随城市天气时，按当地日落慢慢入夜</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night?'checked':''}/></div><div class="setting-row"><div>跟随城市天气<small>每 15 分钟同步当地季节、晴雨雪与日出日落</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather?'checked':''}/></div><h3>城市天气</h3><form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form><div id="city-results" class="city-results" aria-live="polite"></div><div class="weather-info" id="weather-info"></div><p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
-  updateWeatherInfo();$('#panel-content').querySelectorAll('[data-season]').forEach(b=>b.addEventListener('click',()=>selectSeason(b.dataset.season)));$('#panel-content').querySelectorAll('[data-weather]').forEach(b=>b.addEventListener('click',()=>{settings.weather=b.dataset.weather;settings.autoWeather=false;weatherRequest++;persist();applyWeather();renderWeather();}));$('#night').addEventListener('change',e=>{settings.night=e.target.checked;applyWeather();persist();if(settings.autoWeather&&sunTimes)toast(e.target.checked?'已手动进入月下观鱼；下一次日出后会自动回到白天':'已手动回到白天；下一次日落时会自动入夜');});$('#rain-amount').addEventListener('input',e=>{settings.rainAmount=Number(e.target.value);$('#rain-note').firstChild.textContent=`${rainLabel()} · 下雨时生效，跟随城市天气时自动调整`;applyWeather();scheduleSave();});$('#snow-amount').addEventListener('input',e=>{settings.snowAmount=Number(e.target.value);$('#snow-note').firstChild.textContent=`${snowLabel()} · 落雪时生效，岸边会渐渐积雪`;applyWeather();scheduleSave();});$('#auto-weather').addEventListener('change',e=>{if(e.target.checked&&!settings.location){e.target.checked=false;toast('先查询并选择一个城市');$('#city-input').focus();return;}settings.autoWeather=e.target.checked;if(!settings.autoWeather)weatherRequest++;persist();applyWeather();if(settings.autoWeather)fetchWeather();updateWeatherInfo();});$('#city-form').addEventListener('submit',searchCity);}
-function updateWeatherInfo(){const box=$('#weather-info');if(!box)return;if(settings.location&&weatherData){box.textContent=`${settings.location.name} · ${Math.round(weatherData.temperature_2m)}°C · 风速 ${weatherData.wind_speed_10m} km/h${settings.autoWeather&&sunTimes?.label?.set?` · 日出 ${sunTimes.label.rise} · 日落 ${sunTimes.label.set}`:''} · ${settings.autoWeather?'正在联动池塘':'未开启天气联动'}`;}else if(settings.location){box.textContent=`已选择 ${settings.location.name} · ${settings.autoWeather?'正在获取实时天气…':'天气联动未开启'}`;}else box.textContent='当前为手动天气。查询城市后，选择搜索结果即可开启实时联动。';}
-async function searchCity(e){e.preventDefault();const query=$('#city-input').value.trim();if(!query)return;const results=$('#city-results'),button=$('#city-form button');citySearchController?.abort();const controller=new AbortController();citySearchController=controller;const timeout=setTimeout(()=>controller.abort(),12000);button.disabled=true;button.textContent='查询中';results.textContent='正在寻找城市…';try{const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal});if(!response.ok)throw Error('network');const data=await response.json();if(!results.isConnected)return;results.replaceChildren();if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}for(const place of data.results){const b=document.createElement('button');b.className='city-result';b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;sunTimes=null;autoNightState=null;persist();applyWeather();renderWeather();fetchWeather();});results.append(b);}}catch{if(results.isConnected)results.textContent='城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';}finally{clearTimeout(timeout);if(button.isConnected){button.disabled=false;button.textContent='查询';}}}
-async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&daily=sunrise,sunset&forecast_days=2&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code)||!data.current?.time)throw Error('data');const offset=(Number(data.utc_offset_seconds)||0)*1000,toTime=s=>{const t=Date.parse(s+'Z');return Number.isFinite(t)?t-offset:null;},rises=(data.daily?.sunrise||[]).map(toTime).filter(Number.isFinite),sets=(data.daily?.sunset||[]).map(toTime).filter(Number.isFinite);sunTimes=rises.length&&sets.length?{rise:rises[0],set:sets[0],nextRise:rises[1]??null,label:{rise:(data.daily?.sunrise?.[0]||'').slice(11,16),set:(data.daily?.sunset?.[0]||'').slice(11,16)}}:null;weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);const localTime=new Date(weatherData.time),season=seasonFromMonth(localTime.getMonth(),location.latitude<0);if(Object.hasOwn(SEASONS,season)&&settings.season!==season){settings.season=season;settings.weather=SEASONS[season].weather;}if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);syncAutoNight();applyWeather();persist();if(activePanel==='weather')renderWeather();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';if(activePanel==='weather'&&$('#weather-info'))$('#weather-info').textContent='天气服务暂时无法连接，已保留当前池塘天气，可稍后重试。';toast('实时天气暂不可用，已保留当前天气');}}
+// The four season thumbnails are the page's only <img> elements, and they are decoded synchronously.
+// With decoding="async" WebKit repaints a picture it has not decoded yet as an empty box and fills it
+// in later; a panel opened or re-rendered while the pond was preparing its 8K artwork sometimes kept
+// four empty boxes. A 320×180 JPEG decodes in place in about a millisecond, so nothing is gained by waiting.
+function renderWeather(){$('#panel-content').innerHTML=`<p class="description">春看繁花，夏听蝉鸣，秋赏红叶，冬候落雪。</p><h3 class="season-heading">池塘四季</h3><div class="season-options" role="group" aria-label="池塘季节">${Object.entries(SEASONS).map(([v,s])=>`<button type="button" class="season-option ${settings.season===v?'selected':''}" data-season="${v}" aria-label="${s.name}季" aria-pressed="${settings.season===v}"><img src="${s.thumbnail}" alt="" decoding="sync"/><span>${s.name}</span><small>${s.title}</small></button>`).join('')}</div><p class="small-note season-note" id="season-note" role="status">${pendingSeason?'正在切换景色…':'切换季节会换上对应景色与天气，晴雨仍可单独调整。'}</p><h3>此刻天气</h3><div class="weather-options">${[['sunny','晴日','sun'],['cloudy','多云','cloudy'],['rain','下雨','rain'],['snow','落雪','snow']].map(([v,n,i])=>`<button class="weather-option ${settings.weather===v?'selected':''}" data-weather="${v}" aria-pressed="${settings.weather===v}">${icon(i)}<span>${n}</span></button>`).join('')}</div><div class="setting-row"><div>雨量<small id="rain-note">${rainLabel()} · 下雨时生效，跟随城市天气时自动调整</small></div><input id="rain-amount" type="range" aria-label="雨量" min="0" max="1" step="0.05" value="${settings.rainAmount}"/></div><div class="setting-row"><div>雪量<small id="snow-note">${snowLabel()} · 落雪时生效，岸边会渐渐积雪</small></div><input id="snow-amount" type="range" aria-label="雪量" min="0" max="1" step="0.05" value="${settings.snowAmount}"/></div><div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮；跟随城市天气时，按当地日落慢慢入夜</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night?'checked':''}/></div><div class="setting-row"><div>跟随城市天气<small>每 15 分钟同步当地季节、晴雨雪与日出日落</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather?'checked':''}/></div><h3>城市天气</h3><form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form><div id="city-results" class="city-results" aria-live="polite"></div><div class="weather-info" id="weather-info"></div><div class="weather-retry-row"><button type="button" class="edit-fish" id="weather-retry" hidden>重新获取天气</button></div><p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
+  updateWeatherInfo();$('#panel-content').querySelectorAll('[data-season]').forEach(b=>b.addEventListener('click',()=>selectSeason(b.dataset.season)));$('#panel-content').querySelectorAll('[data-weather]').forEach(b=>b.addEventListener('click',()=>{settings.weather=b.dataset.weather;settings.autoWeather=false;weatherRequest++;persist();applyWeather();renderWeather();}));$('#night').addEventListener('change',e=>{settings.night=e.target.checked;applyWeather();persist();if(settings.autoWeather&&sunTimes)toast(e.target.checked?'已手动进入月下观鱼；下一次日出后会自动回到白天':'已手动回到白天；下一次日落时会自动入夜');});$('#rain-amount').addEventListener('input',e=>{settings.rainAmount=Number(e.target.value);$('#rain-note').firstChild.textContent=`${rainLabel()} · 下雨时生效，跟随城市天气时自动调整`;applyWeather();scheduleSave();});$('#snow-amount').addEventListener('input',e=>{settings.snowAmount=Number(e.target.value);$('#snow-note').firstChild.textContent=`${snowLabel()} · 落雪时生效，岸边会渐渐积雪`;applyWeather();scheduleSave();});$('#auto-weather').addEventListener('change',e=>{if(e.target.checked&&!settings.location){e.target.checked=false;toast('先查询并选择一个城市');$('#city-input').focus();return;}settings.autoWeather=e.target.checked;if(!settings.autoWeather)weatherRequest++;else{weatherFailures=0;weatherError=null;clearTimeout(weatherRetryTimer);weatherRetryTimer=0;}persist();applyWeather();if(settings.autoWeather)fetchWeather(true);updateWeatherInfo();});$('#city-form').addEventListener('submit',searchCity);
+  // The sync can always be re-asked by hand: a network that fails once tends to fail again, and waiting
+  // for the quarter-hour poll is a poor answer to "it did not work just now".
+  $('#weather-retry').addEventListener('click',()=>{clearTimeout(weatherRetryTimer);weatherRetryTimer=0;weatherFailures=0;fetchWeather(true);});}
+// Weather is decoration, and the network is the unreliable part: a cold TLS handshake to a host on the
+// far side of the world measured 18 seconds here, one request in ten comes back after two, and a whole
+// office behind one address can hit the service's quota. So the call gets room to breathe, three tries
+// with a growing pause, and a shorter wait before the next poll — never a quarter hour of stale sky.
+const WEATHER_TIMEOUT=20000,CITY_TIMEOUT=20000,WEATHER_RETRY=[60e3,150e3,600e3];
+// Fifteen minutes is the heartbeat; past that a cached sky is worth refreshing the moment the window
+// is looked at again — a laptop that slept for a night should not wake up showing last night's weather.
+const WEATHER_FRESH=15*60e3,WEATHER_CACHE='bichi-pond-sky-v1';
+const WEATHER_REASON={timeout:'天气服务没应答',busy:'天气服务此刻请求太多',data:'天气数据不完整',bad:'这次查询被回绝了',http:'天气服务暂时出错',network:'网络没连上'};
+let weatherError=null,weatherUpdatedAt=0,weatherLoading=false,weatherAttempt=0,weatherFailures=0,weatherRetryTimer=0,weatherInFlight=false;
+function timeLabel(stamp){return stamp?new Date(stamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}):'';}
+// AbortSignal.timeout is Chrome 103 and AbortController itself is 66; an older WebView simply gets no
+// signal, which turns a timeout into "wait for the network" instead of a crash.
+function timeoutSignal(ms){
+  if(typeof AbortSignal!=='undefined'&&typeof AbortSignal.timeout==='function')return AbortSignal.timeout(ms);
+  if(typeof AbortController==='undefined')return undefined;
+  const controller=new AbortController();
+  setTimeout(()=>controller.abort(),ms);
+  return controller.signal;
+}
+// The same question answered once for the city search, where the controller is also the cancellation
+// handle rather than just a timeout: a stand-in keeps the rest of the code unchanged.
+function cancellable(){
+  return typeof AbortController!=='undefined'?new AbortController():{signal:undefined,abort(){}};
+}
+// "It failed" is several very different things to the person reading it: wait a moment, wait longer,
+// change the city, or the service is having a bad day. A refused request (400/422) is the one case
+// where trying again is pure waste, so it is told apart from a dropped connection.
+function weatherKind(error){
+  const status=Number(error?.status)||0;
+  if(status===429)return 'busy';
+  if(status>=500)return 'http';
+  if(status>=400)return 'bad';
+  if(error?.name==='TimeoutError'||error?.name==='AbortError')return 'timeout';
+  if(error?.message==='shape')return 'data';
+  return 'network';
+}
+// The last sky we saw is worth keeping: a cold start then opens on the temperature it had at 16:05
+// instead of the word "随心天气", and the panel can say how old it is. localStorage can be full or
+// blocked (private windows, some embedded webviews), which is a reason to skip the cache, not to fail.
+function readSky(){
+  try{
+    const sky=JSON.parse(localStorage.getItem(WEATHER_CACHE));
+    if(!sky||!Number.isFinite(sky.at)||!sky.current||!Number.isFinite(sky.current.temperature_2m))return null;
+    // A half-day-old temperature is worse than none: it would be shown as if it were the weather now.
+    if(Date.now()-sky.at>12*3600e3)return null;
+    return sky;
+  }catch{return null;}
+}
+function writeSky(data,location,at){
+  try{localStorage.setItem(WEATHER_CACHE,JSON.stringify({at,name:location.name,latitude:location.latitude,longitude:location.longitude,current:data.current,daily:data.daily,utc_offset_seconds:data.utc_offset_seconds}));}catch{}
+}
+// Borrowed only for the same coordinates: a different city is a different sky.
+function hydrateSky(){
+  if(!settings.autoWeather||!settings.location)return false;
+  const sky=readSky();
+  if(!sky||Math.abs(sky.latitude-settings.location.latitude)>1e-4||Math.abs(sky.longitude-settings.location.longitude)>1e-4)return false;
+  weatherData=sky.current;weatherUpdatedAt=sky.at;weatherError=null;
+  sunTimes=sunStamps(sky.daily,sky.utc_offset_seconds);
+  // No background reload: the season artwork already matches what the save file asked for.
+  syncAutoNight();applyWeather(false);
+  return true;
+}
+function updateWeatherInfo(){
+  const box=$('#weather-info');if(!box)return;
+  const retry=$('#weather-retry');
+  if(retry)retry.hidden=!(settings.location&&settings.autoWeather);
+  if(!settings.location){box.textContent='当前为手动天气。查询城市后，选择搜索结果即可开启实时联动。';return;}
+  const name=settings.location.name,temperature=weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'';
+  if(!settings.autoWeather){box.textContent=weatherData?`${name} · ${temperature} · 未开启天气联动`:`已选择 ${name} · 天气联动未开启`;return;}
+  if(weatherLoading){box.textContent=`${name} · ${temperature?`${temperature} · `:''}正在获取实时天气${weatherAttempt>1?`（第 ${weatherAttempt} 次尝试）`:''}…`;return;}
+  if(weatherError){
+    const kept=weatherData?` · 先留着 ${timeLabel(weatherUpdatedAt)} 的天气`:'';
+    box.textContent=`${name} · ${WEATHER_REASON[weatherError]||'同步失败'}${kept} · 稍后自动重试`;
+    return;
+  }
+  if(!weatherData){box.textContent=`已选择 ${name} · 正在获取实时天气…`;return;}
+  const sun=sunTimes?.label?.set?` · 日出 ${sunTimes.label.rise} · 日落 ${sunTimes.label.set}`:'';
+  box.textContent=`${name} · ${temperature} · 风速 ${weatherData.wind_speed_10m} km/h${sun} · ${timeLabel(weatherUpdatedAt)} 同步`;
+}
+// Turning the answer into the pond's weather, kept apart so the fetch loop stays about the network.
+function sunStamps(daily,offsetSeconds){
+  const offset=(Number(offsetSeconds)||0)*1000,toTime=value=>{const stamp=Date.parse(value+'Z');return Number.isFinite(stamp)?stamp-offset:null;};
+  const rises=(daily?.sunrise||[]).map(toTime).filter(Number.isFinite),sets=(daily?.sunset||[]).map(toTime).filter(Number.isFinite);
+  return rises.length&&sets.length?{rise:rises[0],set:sets[0],nextRise:rises[1]??null,label:{rise:(daily?.sunrise?.[0]||'').slice(11,16),set:(daily?.sunset?.[0]||'').slice(11,16)}}:null;
+}
+function applyWeatherData(data,location,at=Date.now()){
+  // Stored before the scene is touched: if a render step throws, the sky we just paid for is not lost,
+  // and the next cold start still has something to show.
+  writeSky(data,location,at);
+  sunTimes=sunStamps(data.daily,data.utc_offset_seconds);
+  weatherData=data.current;
+  weatherError=null;weatherUpdatedAt=at;weatherFailures=0;
+  clearTimeout(weatherRetryTimer);weatherRetryTimer=0;
+  settings.weather=weatherFromCode(weatherData.weather_code);
+  const localTime=new Date(weatherData.time),season=seasonFromMonth(localTime.getMonth(),location.latitude<0);
+  if(Object.prototype.hasOwnProperty.call(SEASONS,season)&&settings.season!==season){settings.season=season;settings.weather=SEASONS[season].weather;}
+  if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);
+  if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);
+  syncAutoNight();applyWeather();persist();
+}
+async function searchCity(e){
+  e.preventDefault();
+  const query=$('#city-input').value.trim();if(!query)return;
+  const results=$('#city-results'),button=$('#city-form button');
+  // Only the newest search may write into the list or re-arm the button: an older request still
+  // unwinding must not print its failure over the newer one, or hand back a button mid-flight.
+  citySearchController?.abort();
+  const controller=cancellable();citySearchController=controller;
+  const current=()=>citySearchController===controller;
+  let timedOut=false;
+  const timeout=setTimeout(()=>{timedOut=true;controller.abort();},CITY_TIMEOUT);
+  button.disabled=true;button.textContent='查询中';
+  results.textContent='正在寻找城市…';
+  try{
+    const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal,cache:'no-store'});
+    if(!response.ok)throw Object.assign(Error(`http ${response.status}`),{status:response.status});
+    const data=await response.json();
+    if(!current()||!results.isConnected)return;
+    while(results.firstChild)results.removeChild(results.firstChild);
+    if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}
+    for(const place of data.results){
+      const b=document.createElement('button');
+      b.className='city-result';
+      b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;
+      b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;sunTimes=null;autoNightState=null;weatherError=null;weatherFailures=0;clearTimeout(weatherRetryTimer);weatherRetryTimer=0;weatherRequest++;persist();applyWeather();renderWeather();fetchWeather(true);});
+      results.append(b);
+    }
+  }catch(error){
+    if(!current()||!results.isConnected)return;
+    results.textContent=timedOut?'查询超时了，网络似乎不太通畅，稍后再试一次。':error?.status===429?'查询太频繁了，等一会儿再试。':'城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';
+  }finally{
+    clearTimeout(timeout);
+    if(current()&&button.isConnected){button.disabled=false;button.textContent='查询';}
+  }
+}
+// One call to the service, with the things that can go wrong told apart: no answer, a refused request,
+// a full quota, or a body that arrives without the fields we need.
+async function weatherCall(location){
+  const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&daily=sunrise,sunset&forecast_days=2&timezone=auto`,{signal:timeoutSignal(WEATHER_TIMEOUT),cache:'no-store'});
+  if(!response.ok){
+    // The service explains itself in the body ("Latitude must be in range of -90 to 90"); keeping the
+    // first line turns a mystery failure into something the panel can name.
+    let reason='';
+    try{reason=(await response.text()).slice(0,120);}catch{}
+    throw Object.assign(Error(`http ${response.status}`),{status:response.status,reason});
+  }
+  const data=await response.json();
+  if(!Number.isFinite(data?.current?.temperature_2m)||!Number.isFinite(data?.current?.weather_code)||!data?.current?.time)throw Error('shape');
+  return data;
+}
+async function fetchWeather(force=false){
+  if(!settings.autoWeather||!settings.location)return false;
+  // The quarter-hour beat, a failure timer and a window waking up can land in the same second; asking
+  // twice spends quota and invites the service's rate limit. A forced call (the retry button) may cut in.
+  if(weatherInFlight&&!force)return false;
+  const request=++weatherRequest,location={...settings.location};
+  weatherLoading=true;weatherInFlight=true;updateWeatherInfo();
+  let kind='network';
+  try{
+    for(let attempt=0;attempt<3;attempt++){
+      if(request!==weatherRequest||!settings.autoWeather)return false;
+      // A second and third try can take half a minute between them; saying which one is running is the
+      // difference between "still working" and "stuck".
+      weatherAttempt=attempt+1;
+      if(attempt>0)updateWeatherInfo();
+      try{
+        const data=await weatherCall(location);
+        if(request!==weatherRequest||!settings.autoWeather)return false;
+        weatherLoading=false;weatherAttempt=0;
+        // Data in hand is a success even if drawing it goes wrong: a throwing renderer must not be
+        // reported as a network failure, or the pond retries a call that already worked.
+        try{applyWeatherData(data,location);if(activePanel==='weather')renderWeather();}
+        catch(error){console.warn('天气已取回，界面更新时出错',error);}
+        return true;
+      }catch(error){
+        if(request!==weatherRequest||!settings.autoWeather)return false;
+        kind=weatherKind(error);
+        if(error?.reason)console.info('天气服务回绝了这次请求：',error.reason);
+        // A full quota or a refused request only gets worse for asking again; a cold socket, a cropped
+        // answer or a dropped packet all deserve the next try.
+        if(kind==='busy'||kind==='bad'||kind==='data')break;
+        if(attempt<2)await new Promise(resolve=>setTimeout(resolve,700*(attempt+1)));
+      }
+    }
+    if(request!==weatherRequest)return false;
+    weatherLoading=false;weatherAttempt=0;
+    weatherError=kind;weatherFailures++;
+    const note=$('#weather-note');
+    if(note)note.textContent='天气同步失败 · 保留当前天气';
+    updateWeatherInfo();
+    if(weatherFailures===1)toast(kind==='timeout'?'天气服务没应答，先留着当前天气，稍后自动重试':kind==='bad'?'这次天气查询没被接受，换一个城市再试试':'实时天气暂不可用，已保留当前天气，稍后自动重试');
+    // The quarter-hour poll stays as the heartbeat; this only brings the next beat forward while the
+    // network is sulking, and the wait stretches so a long outage is not hammered. A refused query is
+    // the exception: asking the same question again cannot change the answer.
+    clearTimeout(weatherRetryTimer);
+    weatherRetryTimer=kind==='bad'?0:setTimeout(()=>{weatherRetryTimer=0;fetchWeather();},WEATHER_RETRY[Math.min(weatherFailures-1,WEATHER_RETRY.length-1)]);
+    return false;
+  }finally{
+    weatherInFlight=false;
+    // Turning the switch off aborts the loop without going through the failure path.
+    if(!settings.autoWeather){weatherLoading=false;weatherAttempt=0;}
+  }
+}
+// A failed sync should not wait for the next timer: the moment the network comes back, or the window
+// is looked at again after a sleep, the sky is worth one more try. The freshness gate keeps a busy
+// alt-tab from turning into a request per focus.
+function weatherWake(minGap=0){
+  if(!settings.autoWeather||!settings.location||document.hidden)return false;
+  if(minGap&&weatherUpdatedAt&&Date.now()-weatherUpdatedAt<minGap)return false;
+  weatherFailures=0;weatherError=null;
+  clearTimeout(weatherRetryTimer);weatherRetryTimer=0;
+  fetchWeather();
+  return true;
+}
+hydrateSky();
 setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
+addEventListener('online',()=>weatherWake(0));
+addEventListener('focus',()=>weatherWake(WEATHER_FRESH));
+addEventListener('pageshow',event=>{if(event.persisted)weatherWake(WEATHER_FRESH);});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)weatherWake(WEATHER_FRESH);});
 function renderSettings(){$('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['butterflies','蝴蝶与蜻蜓','春夏秋随季节出现，冬季隐藏；夏夜萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友'],['chat','好友对话','两尾常在一处的鱼靠近时，会小声聊上一句']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>声音</h3><div class="setting-row"><div>总音量<small>卡片顶部的声音图标可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>${[['water','waterVol','池水轻漾','轻柔池水作背景，音量可以单独调整'],['weatherSound','weatherVol','四季环境音','春听鸟鸣，夏听蝉鸣，秋听叶响，冬听轻风；雨雪随天气变化']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}`;const layoutRow=`<div class="setting-row"><div>显示布局<small>Windows 和 macOS 通用；双屏模式会让每块屏幕独立显示池塘</small></div><select id="display-mode" aria-label="显示布局"><option value="auto" ${settings.displayMode==='auto'?'selected':''}>自动适配</option><option value="dual" ${settings.displayMode==='dual'?'selected':''}>双屏独立</option><option value="portrait" ${settings.displayMode==='portrait'?'selected':''}>竖屏适配</option></select></div>`;$('#panel-content').insertAdjacentHTML('afterbegin',layoutRow);$('#display-mode').addEventListener('change',e=>{settings.displayMode=e.target.value;resize();persist();toast(e.target.value==='dual'?'已切换为双屏独立布局':e.target.value==='portrait'?'已切换为竖屏适配':'已切换为自动适配');});;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击右上角声音按钮即可试听');};document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});}
 function setZen(value){zen=value;document.body.classList.toggle('zen',zen);document.querySelectorAll('.ui').forEach(el=>el.inert=zen);$('#exit-zen').hidden=!zen;$('#zen-button')?.setAttribute('aria-label',zen?'退出沉浸模式':'进入沉浸模式');armCardIdle();}
 $('#zen-button').addEventListener('click',()=>setZen(true));
@@ -657,7 +931,7 @@ addEventListener('pagehide',persist);
 function setPausedState(value){paused=!!value;last=0;if(sound.context&&sound.active){if(paused)sound.context.suspend();else sound.context.resume();}}
 // For a host app (the macOS menu-bar item, the Windows tray): switch weather, night or sound, pause the pond, read the current state.
 window.pondControl={
-  set(o={}){if(Object.hasOwn(SEASONS,o.season))selectSeason(o.season);if(['sunny','cloudy','rain','snow'].includes(o.weather)){settings.weather=o.weather;settings.autoWeather=false;weatherRequest++;}if(typeof o.night==='boolean')settings.night=o.night;if(typeof o.feedMode==='boolean')setFeedMode(o.feedMode);if(typeof o.soundOn==='boolean'){settings.soundOn=o.soundOn;syncSound();}if(typeof o.zen==='boolean')setZen(o.zen);if(typeof o.find==='string'&&scene)scene.highlight={id:o.find,until:scene.time+5};applyWeather();persist();if(activePanel==='weather')renderWeather();return this.state();},
+  set(o={}){if(has(SEASONS,o.season))selectSeason(o.season);if(['sunny','cloudy','rain','snow'].includes(o.weather)){settings.weather=o.weather;settings.autoWeather=false;weatherRequest++;}if(typeof o.night==='boolean')settings.night=o.night;if(typeof o.feedMode==='boolean')setFeedMode(o.feedMode);if(typeof o.soundOn==='boolean'){settings.soundOn=o.soundOn;syncSound();}if(typeof o.zen==='boolean')setZen(o.zen);if(typeof o.find==='string'&&scene)scene.highlight={id:o.find,until:scene.time+5};applyWeather();persist();if(activePanel==='weather')renderWeather();return this.state();},
   pause(value){setPausedState(value);return this.state();},
   state(){return{season:settings.season,weather:settings.weather,night:settings.night,autoWeather:settings.autoWeather,feedMode,soundOn:sound.active,paused};}
 };
@@ -666,7 +940,7 @@ window.pondControl={
 // TEMP DIAGNOSTIC (remove once the Windows corner card is confirmed): every tap on the desktop
 // wallpaper is logged by the host, so a dead button can be traced to the tap, the hit test or the request.
 function hostDebug(text){try{window.chrome?.webview?.postMessage('dbg:'+text);}catch{}}
-window.pondTapDevice=(x,y)=>{const d=devicePixelRatio||1;hostDebug(`device ${x},${y} dpr=${d}`);window.pondTap(x/d,y/d);};
+window.pondTapDevice=(x,y,controlsOnly)=>{const d=devicePixelRatio||1;hostDebug(`device ${x},${y} dpr=${d}${controlsOnly?' through an overlay':''}`);window.pondTap(x/d,y/d,controlsOnly);};
 window.pondHoldDevice=(x,y)=>{const d=devicePixelRatio||1;window.pondHold(x/d,y/d);};
 window.pondDoubleTapDevice=(x,y)=>{const d=devicePixelRatio||1;window.pondDoubleTap(x/d,y/d);};
 // The desktop wallpaper only passes a press and a release, so holding still and double-tapping are
@@ -684,7 +958,10 @@ window.pondDoubleTap=(x,y)=>{
 // On the Windows corner wallpaper the tap is first offered to the card's controls: a plain button
 // (投喂/声音/沉浸) acts on the spot, and a panel button opens its panel right here on the desktop,
 // the same panel the interactive window shows — no second window.
-window.pondTap=(x,y)=>{
+// The Windows host also passes on a tap that landed through a see-through window lying over the card (a
+// desktop clock or date widget). That one is meant for the controls it can still be seen under, so it stops
+// there: it never reads as food dropped through somebody else's window.
+window.pondTap=(x,y,controlsOnly)=>{
   if(!scene)return;
   // A tap on the desktop is a sign of use too: it keeps the corner card from folding while someone plays.
   cardAwake();
@@ -702,6 +979,7 @@ window.pondTap=(x,y)=>{
       else control.click();
       return;
     }
+    if(controlsOnly)return;
   }
   if(scene.touchSeasons(x,y)){if(sound.active)sound.tap();return;}
   if(lanternAt(x,y))return;

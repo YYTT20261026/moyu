@@ -86,6 +86,9 @@
     ctx.globalCompositeOperation='source-over';
     for(const rock of map.rocks){path(rock);ctx.fill();}
     for (const f of defs) {
+      // Rocks belong to the traced bank/rock polygons above. Their weather-effect
+      // ellipses are only drawing bounds, not extra patches of dry land.
+      if (f[3] === 'r') continue;
       const [x, y, rx, kind, ry = rx, rot = 0] = f, g = grow(f), stalk = kind === 'b' || (kind === 'f' && rx > 25);
       ctx.fillStyle = kind === 'r' ? 'rgb(255,0,0)' : stalk ? 'rgb(255,255,0)' : 'rgb(255,255,255)';
       ctx.beginPath(); ctx.ellipse(x * kx, y * ky, rx * g * kx, ry * g * ky, rot, 0, TAU); ctx.fill();
