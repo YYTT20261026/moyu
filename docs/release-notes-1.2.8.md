@@ -1,6 +1,6 @@
 # MoYu v1.2.8
 
-> 本次统一更名为 **MoYu**，并把 Windows / Android / Web 全部更新到 1.2.8。macOS 通用版（Apple 芯片 + Intel）由 GitHub Actions 的 Intel runner 构建后补传。
+> 本次统一更名为 **MoYu**，全平台（Windows / Android / Web / macOS）均已更新到 1.2.8。macOS 提供通用版（Apple 芯片 + Intel）与 Apple 芯片版。
 
 ## 更名与升级
 
@@ -41,11 +41,13 @@
 | Windows 安装器 `MoYu-1.2.8.exe` | 49.8 MB |
 | Android `MoYu-1.2.8-Android.apk` | 31.9 MB |
 | Web / Wallpaper Engine `MoYu-1.2.8-Web.zip` | 57.0 MB |
-| macOS 通用版 | 待 Actions 构建后补传（Apple 芯片 + Intel） |
+| macOS 通用版（Apple 芯片 + Intel）`MoYu-1.2.8-macOS-universal.dmg` | 58.7 MB |
+| macOS 仅 Apple 芯片 `MoYu-1.2.8.dmg` | 58.6 MB |
 
 ## 验证
 
 - 完整测试 **170 项全部通过**。
+- macOS 通用版：`lipo -archs` 为 `x86_64 arm64`，同时覆盖 Intel 与 Apple 芯片。
 - Windows 便携版/安装器重新 `publish` 并校验 `FileVersion=1.2.8.0`；APK 通过 `apksigner verify`，`versionCode=8`、`versionName=1.2.8`、label `MoYu`，无重复 wav、无非法条目。
 - Wallpaper Engine：`file://` 加载、隐藏启动、属性回调、暂停/恢复均实测通过。
 
@@ -54,4 +56,6 @@
 - Windows：`MoYu-1.2.8-Windows.zip` / `MoYu-1.2.8.exe`
 - Android：`MoYu-1.2.8-Android.apk`
 - Web / Wallpaper Engine：`MoYu-1.2.8-Web.zip`
+- macOS 通用版（推荐）：`MoYu-1.2.8-macOS-universal.dmg`
+- macOS 仅 Apple 芯片：`MoYu-1.2.8.dmg`
 - 校验：`SHA256SUMS.txt`
