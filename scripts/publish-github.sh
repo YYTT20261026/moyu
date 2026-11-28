@@ -1,11 +1,11 @@
 #!/bin/zsh
-# 摸鱼 · publish to GitHub: create the public repository (if needed), push, and release every app.
+# MoYu · publish to GitHub: create the public repository (if needed), push, and release every app.
 # Needs the GitHub CLI signed in to the owning account:  gh auth login
 # Builds are taken from dist/ (run the scripts/build-*.sh first), renamed to plain ASCII for the release.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="${REPO:-YYTT20261026/moyu}"
-VERSION="${VERSION:-1.2.7}"
+VERSION="${VERSION:-1.2.8}"
 GH="${GH:-$(command -v gh || true)}"
 [[ -n "$GH" ]] || { echo "GitHub CLI not found: https://cli.github.com (or set GH=/path/to/gh)"; exit 1; }
 "$GH" auth status >/dev/null 2>&1 || { echo "Sign in first:  gh auth login"; exit 1; }
@@ -13,15 +13,16 @@ cd "$ROOT"
 
 echo "▸ Collecting the apps…"
 OUT="$ROOT/build/release"; rm -rf "$OUT"; mkdir -p "$OUT"
-cp "dist/摸鱼-$VERSION.dmg" "$OUT/MoYu-$VERSION-macOS.dmg"
-cp "dist/摸鱼-Windows-$VERSION.zip" "$OUT/MoYu-$VERSION-Windows.zip"
-cp "dist/摸鱼.apk" "$OUT/MoYu-$VERSION-Android.apk"
+cp "dist/MoYu-$VERSION.dmg" "$OUT/MoYu-$VERSION-macOS.dmg"
+cp "dist/MoYu-Windows-$VERSION.zip" "$OUT/MoYu-$VERSION-Windows.zip"
+cp "dist/MoYu.apk" "$OUT/MoYu-$VERSION-Android.apk"
+cp "dist/MoYu-$VERSION.exe" "$OUT/MoYu-$VERSION.exe"
 (cd dist && zip -qr -X "$OUT/MoYu-$VERSION-Web.zip" index.html style.css core.js art.js gl.js scene.js audio.js app.js project.json assets -x '*.DS_Store')
 (cd "$OUT" && shasum -a 256 MoYu-* > SHA256SUMS.txt)
 
 echo "▸ Repository $REPO…"
 if ! "$GH" repo view "$REPO" >/dev/null 2>&1; then
-  "$GH" repo create "$REPO" --public --description "摸鱼 · 锦鲤池塘动态壁纸（macOS / Windows / Android / Web）"
+  "$GH" repo create "$REPO" --public --description "MoYu · 锦鲤池塘动态壁纸（macOS / Windows / Android / Web）"
 fi
 git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$REPO.git"
 "$GH" auth setup-git
@@ -32,6 +33,6 @@ NOTES="docs/release-notes-$VERSION.md"
 if "$GH" release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
   "$GH" release upload "v$VERSION" "$OUT"/* --repo "$REPO" --clobber
 else
-  "$GH" release create "v$VERSION" "$OUT"/* --repo "$REPO" --title "摸鱼 v$VERSION" --notes-file "$NOTES"
+  "$GH" release create "v$VERSION" "$OUT"/* --repo "$REPO" --title "MoYu v$VERSION" --notes-file "$NOTES"
 fi
 echo "✓ https://github.com/$REPO/releases/tag/v$VERSION"

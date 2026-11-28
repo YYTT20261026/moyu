@@ -1,4 +1,4 @@
-// 碧池观鱼 · the pond page in a WebView, shared by the app window and the live wallpaper.
+// MoYu · the pond page in a WebView, shared by the app window and the live wallpaper.
 // Every pond page in the process is registered here: when one saves, the save is handed to the others,
 // so a koi named in the app is named on the home screen a moment later.
 package com.bichi.koipond;
@@ -23,6 +23,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 final class PondWeb {
     static final String INDEX = "file:///android_asset/index.html";
@@ -36,6 +37,10 @@ final class PondWeb {
 
     /** A WebView showing the pond. mode "wallpaper" hides the page's controls and runs it at a battery-friendly pace. */
     static WebView create(Context context, String mode, WebViewClient client) {
+        return create(context, mode, client, null);
+    }
+
+    static WebView create(Context context, String mode, WebViewClient client, Consumer<WebView> onPondFrame) {
         WebView web = new WebView(context);
         web.setBackgroundColor(POND);
         WebSettings s = web.getSettings();
@@ -56,7 +61,7 @@ final class PondWeb {
             }
         });
         web.setWebViewClient(client);
-        web.addJavascriptInterface(new Host(context.getApplicationContext(), web), "PondHost");
+        web.addJavascriptInterface(new Host(context.getApplicationContext(), web, onPondFrame), "PondHost");
         web.loadUrl(mode == null ? INDEX : INDEX + "?mode=" + mode);
         LIVE.add(web);
         return web;
@@ -102,15 +107,32 @@ final class PondWeb {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try { context.startActivity(pick); return; } catch (Exception ignored) { }
         try { context.startActivity(new Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return; } catch (Exception ignored) { }
-        Toast.makeText(context, "请在系统「壁纸」设置中选择动态壁纸「摸鱼」", Toast.LENGTH_LONG).show();
+        Toast.makeText(context, "请在系统「壁纸」设置中选择动态壁纸「MoYu」", Toast.LENGTH_LONG).show();
     }
 
     /** window.PondHost in the page. Calls arrive on a WebView thread; everything is done on the main thread. */
     static final class Host {
         private final Context context;
         private final WebView owner;
+        private final Consumer<WebView> onPondFrame;
 
-        Host(Context context, WebView owner) { this.context = context; this.owner = owner; }
+        Host(Context context, WebView owner, Consumer<WebView> onPondFrame) {
+            this.context = context; this.owner = owner; this.onPondFrame = onPondFrame;
+        }
+
+        @JavascriptInterface
+        public void pondFrameReady() {
+            if (onPondFrame == null) return;
+            MAIN.post(() -> {
+                if (!LIVE.contains(owner)) return;
+                // Wait until the page's rendered canvas (and CSS for Canvas 2D) is ready to composite.
+                owner.postVisualStateCallback(0, new WebView.VisualStateCallback() {
+                    @Override public void onComplete(long id) {
+                        if (LIVE.contains(owner)) onPondFrame.accept(owner);
+                    }
+                });
+            });
+        }
 
         @JavascriptInterface
         public void postMessage(String json) {

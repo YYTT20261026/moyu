@@ -1,4 +1,4 @@
-// 碧池观鱼 · the Win32 calls the wallpaper needs: finding the desktop's window layers, reparenting into them,
+// MoYu · the Win32 calls the wallpaper needs: finding the desktop's window layers, reparenting into them,
 // a low-level mouse hook for taps on the desktop, and window/monitor geometry.
 using System;
 using System.Collections.Generic;
@@ -62,8 +62,13 @@ namespace BichiPond
         [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hwnd);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
         [DllImport("user32.dll")] public static extern int MapWindowPoints(IntPtr from, IntPtr to, ref RECT rect, int count);
-        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
-        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+        // GetWindowLongPtrW / SetWindowLongPtrW only exist in the 64-bit user32. A 32-bit Windows 10 runs this
+        // app as a 32-bit process (AnyCPU), where calling them throws EntryPointNotFoundException, so that case
+        // takes the plain GetWindowLongW / SetWindowLongW pair instead.
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr64(IntPtr hwnd, int index);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern IntPtr GetWindowLong32(IntPtr hwnd, int index);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr64(IntPtr hwnd, int index, IntPtr value);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern IntPtr SetWindowLong32(IntPtr hwnd, int index, IntPtr value);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte alpha, uint flags);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint key, out byte alpha, out uint flags);
         [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
@@ -91,6 +96,13 @@ namespace BichiPond
             GetClassName(hwnd, sb, sb.Capacity);
             return sb.ToString();
         }
+
+        /// <summary>Window style bits, 32- or 64-bit; see the import note above.</summary>
+        public static IntPtr GetWindowLongPtr(IntPtr hwnd, int index) =>
+            IntPtr.Size == 8 ? GetWindowLongPtr64(hwnd, index) : GetWindowLong32(hwnd, index);
+
+        public static IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value) =>
+            IntPtr.Size == 8 ? SetWindowLongPtr64(hwnd, index, value) : SetWindowLong32(hwnd, index, value);
 
         /// <summary>Scale from CSS px to device px for a window (1.0 at 96 dpi); falls back to 1 before Windows 10 1607.</summary>
         public static double ScaleOf(IntPtr hwnd)

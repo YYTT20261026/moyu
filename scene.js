@@ -6,6 +6,9 @@
   const TAU = Math.PI * 2;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
   const smoothstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  // Retain matching items in place. The update loop runs every frame, and filter() would allocate a new
+  // array each time; heavy rain alone can drop dozens of ripples a second.
+  const keep = (list, test) => { let n = 0; for (let i = 0; i < list.length; i++) { const v = list[i]; if (test(v)) list[n++] = v; } list.length = n; return list; };
 
   // Things above the water in the supplied painting (assets/pond-runtime.png, 2560×1440).
   // [x, y, rx, kind, ry, rotation]; l = lotus/pennywort leaf, f = flower or petal, b = lotus bud, r = rock breaking the surface.
@@ -57,7 +60,7 @@
   // blue = rests on the water and leaves a wet line (flowers on stalks do not).
   // The overhanging canopy is painted into each bed, but belongs above the swimming koi.
   // Restrict colour extraction to its corner; unlike a solid polygon this keeps water visible
-  // between petals, leaves and twigs. These bounds are UVs, independent of the 8K source size.
+  // between petals, leaves and twigs. These bounds are UVs, independent of the 4K image size.
   const CANOPIES = {
     spring: [[.64,0],[1,0],[1,.61],[.92,.61],[.82,.55],[.82,.43],[.85,.33],[.73,.25],[.68,.18]],
     summer: [[.64,0],[1,0],[1,.57],[.94,.57],[.83,.45],[.82,.3],[.72,.25],[.68,.17]],
@@ -74,7 +77,7 @@
   }
   function floatMask(width, height, season='spring', image) {
     const map=POND_MAPS[season]||POND_MAPS.spring,defs=floaterDefinitions(season);
-    // 底图可以是 8K；遮罩按标注尺度取样即可（采样用归一化坐标），不必跟着放大。
+    // 底图统一为 4K；遮罩按标注尺度取样即可（采样用归一化坐标），不必跟着放大。
     const k = Math.min(.5, map.width / width), c = document.createElement('canvas');
     c.width = Math.round(width * k); c.height = Math.round(height * k);
     const ctx = c.getContext('2d'), kx = c.width / map.width, ky = c.height / map.height;
@@ -128,7 +131,7 @@
     snow: { sunK: .55, bright: .94, sat: .56, tint: [.99, 1.02, 1.07], caustic: .06, causticTint: [.95, .98, 1], glint: .28, glintColor: [.95, .98, 1], sky: [.9, .93, .96], skyK: .11, cloudCover: .75, cloudShade: .2, wave: .42, refract: 13, ripple: 8, shade: .22, shadow: .5, vignette: .5, water: [.4, .48, .48], moon: 0, mist: .04 }
   };
   function lookFor(weather, night, rain = .5, snow = .5) {
-    const l = JSON.parse(JSON.stringify(LOOKS[weather] || LOOKS.sunny));
+    const l = copyLook({}, LOOKS[weather] || LOOKS.sunny);
     if (weather === 'rain') Object.assign(l, { bright: .86 - .16 * rain, sat: .64 - .1 * rain, wave: .72 + .55 * rain, skyK: .09 + .07 * rain, mist: .04 + .12 * rain });
     if (weather === 'snow') Object.assign(l, { bright: .9 + .08 * snow, sat: .62 - .15 * snow, cloudCover: .6 + .4 * snow, skyK: .08 + .09 * snow, caustic: .07 * (1 - snow * .6), wave: .5 - .12 * snow, mist: .02 + .06 * snow });
     if (night) Object.assign(l, { sunK: l.sunK * .45, bright: l.bright * .46, sat: l.sat * .72, tint: [.64, .8, 1.14], caustic: l.caustic * .25, glint: .55, glintColor: [.7, .82, 1], sky: [.22, .3, .44], skyK: l.skyK * 1.3 + .04, wave: l.wave * 1.1, shadow: l.shadow * .35, cloudShade: l.cloudShade * .5, moon: weather === 'sunny' || weather === 'snow' ? 1 : .35, water: [.2, .3, .36], mist: l.mist * .6 });
@@ -138,6 +141,15 @@
   function moonPhase(date = new Date()) {
     const month = 29.530588853, age = (((date - Date.UTC(2000, 0, 6, 18, 14)) / 864e5) % month + month) % month, angle = age / month * TAU;
     return { age, angle, illum: (1 - Math.cos(angle)) / 2, name: ['新月', '蛾眉月', '上弦月', '盈凸月', '满月', '亏凸月', '下弦月', '残月'][Math.round(age / month * 8) % 8] };
+  }
+  function copyLook(a, b) {
+    for (const k in b) {
+      if (Array.isArray(b[k])) {
+        if (!Array.isArray(a[k])) a[k] = b[k].slice();
+        else for (let i = 0; i < b[k].length; i++) a[k][i] = b[k][i];
+      } else a[k] = b[k];
+    }
+    return a;
   }
   function lerpLook(a, b, t) { for (const k in b) { if (Array.isArray(b[k])) for (let i = 0; i < b[k].length; i++) a[k][i] += (b[k][i] - a[k][i]) * t; else a[k] += (b[k] - a[k]) * t; } }
 
@@ -593,7 +605,7 @@
       this.turtles = [0, 1].map(v => new Turtle(v, rnd));
       this.butterflies = [0, 1, 2].map(s => new Butterfly(s, rnd));
       this.dragonflies = [0, 1].map(s => new Dragonfly(s, rnd));
-      this.crabs = [0, 1, 0].map(v => new Crab(v, rnd)); this.crabHomes = [];
+      this.crabs = [0, 1, 0].map(v => new Crab(v, rnd)); this.crabHomes = []; this.crabTaken = [];
       // Their own seeded stream keeps frog wandering from changing the pond's other random events.
       this.frogs = [0, 1, 0, 1].map((v, i) => new Frog(v, randomSeed(5071 + i * 977)));
       this.frogHomes = []; this.frogHomeDefs = []; this.frogSpots = []; this.frogCount = 0; this.activeFrogs = [];
@@ -605,6 +617,9 @@
       this.bolts = []; this.nextBolt = 15; this.events = []; this.calm = !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches);
       this.wetCover = 0;
       this.look = lookFor('sunny', false); this.look.shadowDir = [.7, .72];
+      this.lookTargets = null; this.lookTarget = lookFor('sunny', false); this.depthItems = []; this.driftSample = {};
+    // Moon reflection: a fixed east-west path across the pond, walked as the night runs.
+    this.moonAt = [0, 0]; this.moonHome = null; this.nightWindow = null; this.moonDisc = [0, 0, 1, 0];
       this.pose = new Float32Array((BODY.segments + 1) * 4);
       this.spots = []; this.finTint = PALETTES.map(p => [...rgb(p.fin), .9]);
     }
@@ -639,7 +654,7 @@
     fireflyWeather(settings) { return this.insects.fireflies > 0 && settings.butterflies && settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
     // What two koi say when they meet. Each koi speaks out of its own temperament.
     updateChat(dt, settings) {
-      this.chats = this.chats.filter(c => c.until > this.time);
+      keep(this.chats, c => c.until > this.time);
       if (!settings.chat) { if (this.chats.length) this.chats.length = 0; this.nextChat = 5; return; }
       this.nextChat -= dt;
       if (this.nextChat > 0) return;
@@ -678,13 +693,18 @@
     }
     drop(x, y, r, s, rain = false) {
       // Large disturbances stay limited to two; small rain impacts need continuous waves.
-      this.waterRipples = this.waterRipples.filter(p => p.until > this.time);
+      keep(this.waterRipples, p => p.until > this.time);
       if (s > .05 && (rain || this.waterRipples.length < 2)) {
         if (!rain) this.waterRipples.push({ until: this.time + 1.8 });
         // Canvas uses the small impact sprites below instead of making a second, large ring.
         if (!rain || this.R.ripples !== false) this.R.drop(x, y, r, s * .65);
       }
-      for (const particles of [this.petals, this.drifters]) for (const p of particles) {
+      for (const p of this.petals) {
+        if (p.visible === false) continue;
+        const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
+        if (d < r * 8 && d > 0) { p.vx += dx / d * s * 40; p.vy += dy / d * s * 40; }
+      }
+      for (const p of this.drifters) {
         if (p.visible === false) continue;
         const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
         if (d < r * 8 && d > 0) { p.vx += dx / d * s * 40; p.vy += dy / d * s * 40; }
@@ -783,6 +803,27 @@
     // The moon's reflection is where a lantern is set adrift; anywhere else a tap still feeds the koi.
     moonLanternSpot(x, y) {
       return !!this.look.moon && Math.hypot(x - this.moonAt[0], y - this.moonAt[1]) < Math.max(90, 130 * this.scale);
+    }
+    // The real night (the followed city's sunset → sunrise) walks the reflection from east to west.
+    // 月下观鱼 can also be switched on by hand at any hour: without a night window it drifts on a slow
+    // 24-minute round trip, easing at the banks instead of jumping back.
+    setNightWindow(start, end) {
+      this.nightWindow = Number.isFinite(start) && Number.isFinite(end) && end > start ? [start, end] : null;
+    }
+    updateMoonPath(now = Date.now()) {
+      const home = this.moonHome;
+      if (!home) return;
+      let t;
+      if (this.nightWindow) {
+        const [start, end] = this.nightWindow;
+        t = (now - start) / (end - start);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+      } else {
+        const period = 24 * 60 * 1000;
+        t = .5 - .5 * Math.cos(TAU * (((now % period) + period) % period) / period);
+      }
+      this.moonAt[0] = this.w * .2 + this.w * .6 * t;
+      this.moonAt[1] = home[1];
     }
     releaseLantern(x, y) {
       const safe = this.sim.habitat ? this.sim.habitat.project(x, y, 14 * this.scale) : [x, y];
@@ -892,7 +933,7 @@
     layout(w, h) {
       this.w = w; this.h = h; this.scale = clamp(Math.min(w, h) / 800, .62, 1.12);
       this.rain.length = 0;
-      this.splashes = this.splashes.filter(p => !p.rain);
+      keep(this.splashes, p => !p.rain);
       const R = this.R, inside = ([x, y]) => x > 20 && x < w - 20 && y > 20 && y < h - 20;
       this.spots = this.floaterDefs.filter(f => f[3] !== 'r' && f[2] > 25).map(([x, y]) => R.imageToScreen(x, y)).filter(inside);
       this.buds = this.floaterDefs.filter(f => f[3] === 'b').map(([x, y, rx, k, ry = rx, rot = 0]) => R.imageToScreen(x - Math.sin(rot) * ry * .7, y - Math.cos(rot) * ry * .7)).filter(inside);
@@ -931,7 +972,7 @@
       // Project the whole plant's footprint into water, away from rocks and the dry bank.
       this.plantRipples.length = 0;
       // Keep the patch in the lower-left of the water regardless of the bed's on-screen scale.
-      // Tests draw the bed 1:1, the page may shrink a 8K image to a fraction of that size.
+      // Tests draw the bed 1:1, the page may shrink a 4K image to a fraction of that size.
       const probe = R.imageToScreen(1000, 1000), map = POND_MAPS[this.season];
       const scale = Math.min(probe[0] / 1000, probe[1] / 1000);
       const [ix, iy] = scale < .5
@@ -975,16 +1016,24 @@
       }
       for (const f of this.frogs) if (f.state !== 'hidden' && (f.x < 0 || f.x > w || f.y < 0 || f.y > h)) { f.state = 'hidden'; f.alpha = 0; f.timer = .5 + f.rnd() * 2; }
       this.causticCell = clamp(Math.min(w, h) / 7, 70, 150);
-      const [mx, my] = R.imageToScreen(1000, 255); this.moonAt = [clamp(mx, w * .2, w * .8), clamp(my, h * .15, h * .5)]; this.phaseAt = 0;
+      const [mx, my] = R.imageToScreen(1000, 255);
+      this.moonHome = [clamp(mx, w * .2, w * .8), clamp(my, h * .15, h * .5)];
+      this.moonAt[0] = this.moonHome[0]; this.moonAt[1] = this.moonHome[1]; this.phaseAt = 0;
       for (const b of this.butterflies) { if (b.x < 0) { b.x = this.rnd() * w; b.y = this.rnd() * h; } else { b.x *= w / this.prevW; b.y *= h / this.prevH; } b.target = null; b.state = 'fly'; }
       this.prevW = w; this.prevH = h;
     }
     setLook(weather, night, dt, amounts = {}, nightK = night ? 1 : 0) {
       // twilight: blend the day and night palettes, so following a city's sunset dims the pond by
       // degrees instead of flipping the whole picture in one frame.
-      const target = lookFor(weather, false, amounts.rainAmount, amounts.snowAmount);
-      if (nightK > 0) lerpLook(target, lookFor(weather, true, amounts.rainAmount, amounts.snowAmount), clamp(nightK, 0, 1));
-      if (dt === undefined) { const dir = this.look.shadowDir; this.look = target; this.look.shadowDir = dir; }
+      const rain = amounts.rainAmount === undefined ? .5 : amounts.rainAmount, snow = amounts.snowAmount === undefined ? .5 : amounts.snowAmount;
+      let targets = this.lookTargets;
+      if (!targets || targets.weather !== weather || targets.rain !== rain || targets.snow !== snow) {
+        targets = this.lookTargets = { weather, rain, snow, day: lookFor(weather, false, rain, snow), night: lookFor(weather, true, rain, snow) };
+      }
+      // 昼夜目标只读，黄昏混色写入实例自己的临时对象，避免插值污染缓存。
+      const target = copyLook(this.lookTarget, targets.day);
+      if (nightK > 0) lerpLook(target, targets.night, clamp(nightK, 0, 1));
+      if (dt === undefined) { const dir = this.look.shadowDir; this.look = copyLook({}, target); this.look.shadowDir = dir; }
       else lerpLook(this.look, target, 1 - Math.exp(-dt * 1.1));
       // Clear skies remove the previous weather's clouds immediately; lighting still eases toward sunlight.
       if (target.cloudCover === 0) { this.look.cloudCover = 0; this.look.cloudShade = 0; }
@@ -1007,8 +1056,10 @@
           }
         } else this.highlight = null;
       }
-      if (this.time - this.phaseAt > 60 || !this.moonDisc) { this.phaseAt = this.time; this.phase = moonPhase(); }
-      this.moonDisc = [this.moonAt[0], this.h - this.moonAt[1], 26 * this.scale, this.phase.angle];
+      if (this.time - this.phaseAt > 60 || !this.phase) { this.phaseAt = this.time; this.phase = moonPhase(); }
+      this.updateMoonPath();
+      this.moonDisc[0] = this.moonAt[0]; this.moonDisc[1] = this.h - this.moonAt[1];
+      this.moonDisc[2] = 26 * this.scale; this.moonDisc[3] = this.phase.angle;
       const rainK = clamp(settings.rainAmount ?? .5, 0, 1), snowK = clamp(settings.snowAmount ?? .5, 0, 1);
       // Snow settles on leaves, flowers and rocks while it falls and melts away after.
       this.snowCover = settings.weather === 'snow' ? Math.min(snowK * .9, (this.snowCover || 0) + dt * (.004 + .02 * snowK)) : Math.max(0, (this.snowCover || 0) - dt * .012);
@@ -1026,7 +1077,12 @@
       if (settings.turtles) for (const t of this.turtles) t.update(dt, w, h, scale, this);
       // Crabs come out in any weather but snow.
       const crabsOut = settings.crabs !== false && weather !== 'snow';
-      for (const c of this.crabs) c.update(dt, this.R, scale, this.crabHomes, crabsOut, this, this.crabs.filter(o => o !== c && o.state !== 'hidden').map(o => o.home));
+      for (const c of this.crabs) {
+        // Reused list of homes other visible crabs occupy: no filter/map allocation per crab per frame.
+        this.crabTaken.length = 0;
+        for (const o of this.crabs) if (o !== c && o.state !== 'hidden') this.crabTaken.push(o.home);
+        c.update(dt, this.R, scale, this.crabHomes, crabsOut, this, this.crabTaken);
+      }
       // Frogs only come out in spring and summer, croaking more often after dark.
       for (const f of this.activeFrogs) f.update(dt, this, settings);
       if (this.butterflyWeather(settings)) for (const b of this.activeButterflies) b.update(dt, w, h, scale, this.spots, this.time);
@@ -1039,7 +1095,7 @@
       // reach turn toward it and circle instead of piling into the middle.
       for (const l of this.lures) l.age += dt;
       if (!this.fireflyWeather(settings)) this.lures.length = 0;
-      this.lures = this.lures.filter(l => l.age < l.life);
+      keep(this.lures, l => l.age < l.life);
       const lure = this.lures[0], glow = lure ? this.lureGlow(lure) : 0, reach = lure ? 460 * scale * (1 - .45 * lure.age / lure.life) : 0;
       for (const f of this.flies) {
         const kick = 1 + (f.kick || 0) * 3.2;
@@ -1067,7 +1123,7 @@
         if(safe)this.petals.push({ x: safe[0], y: safe[1], a: rnd()*TAU, spin: (rnd()-.5)*.12, vx: 0, vy: 0, life: 60+rnd()*60, age: 0, s, r, flow: rnd()*TAU, aim: rnd()*TAU, turnIn: 5+rnd()*9, speed: 2.8+rnd()*2.8, phase: rnd()*TAU });
       }
       for (const p of this.petals) { p.age += dt; this.driftParticle(p, dt, scale); }
-      this.petals = this.petals.filter(p => p.age < p.life);
+      keep(this.petals, p => p.age < p.life);
       // River lanterns drift on the same slow current, turn away from the bank, and go out after a while
       // or once the moon is gone and daylight returns.
       for (const l of this.lanterns) {
@@ -1078,7 +1134,7 @@
         else { l.flow += Math.PI * (.5 + rnd() * .5); l.vx *= -.35; l.vy *= -.35; }
         if (!this.look.moon) l.age += dt * 6;
       }
-      this.lanterns = this.lanterns.filter(l => l.age < l.life);
+      keep(this.lanterns, l => l.age < l.life);
       this.separateLanterns();
       // Moonlight glints ride the wave front at the ripple's own speed, so they stay on the ring as
       // it widens; one carried onto the bank goes out with the wave.
@@ -1089,7 +1145,7 @@
         const x = p.cx + Math.cos(p.a) * p.r, y = p.cy + Math.sin(p.a) * p.r;
         if (!this.sim.isWater(x, y, 2)) p.age = p.life;
       }
-      if (this.sparkles.length) this.sparkles = this.sparkles.filter(p => p.age < p.life);
+      if (this.sparkles.length) keep(this.sparkles, p => p.age < p.life);
       // Rain streaks and drops; snowflakes melting into the pond.
       const rainN = weather === 'rain' ? Math.round((30 + 190 * rainK) * Math.min(1, w * h / 1.2e6) + 20) : 0;
       this.rainK = rainK; this.look.rainK = weather === 'rain' ? rainK : 0;
@@ -1116,10 +1172,10 @@
         if (Math.abs(fl.ja) + Math.abs(fl.jv) + Math.abs(fl.ox) + Math.abs(fl.oy) + Math.abs(fl.vx) + Math.abs(fl.vy) < 1e-3) fl.ja = fl.jv = fl.ox = fl.oy = fl.vx = fl.vy = 0;
       }
       for (const p of this.splashes) { p.age += dt; if (!p.ring) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.exp(-dt * 7); p.vy *= Math.exp(-dt * 7); } }
-      this.splashes = this.splashes.filter(p => p.age < p.life);
+      keep(this.splashes, p => p.age < p.life);
       // Water sluiced off a leaf and snow knocked off a rock: a few motes that fall and fade.
       for (const p of this.motes) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= Math.exp(-dt * 1.6); }
-      this.motes = this.motes.filter(p => p.age < p.life);
+      keep(this.motes, p => p.age < p.life);
       // Snow brushed off a rock or flower fills back in as long as it keeps falling.
       if (settings.weather === 'snow') for (const fl of this.floaters) if ((fl.snow ?? 1) < 1) fl.snow = Math.min(1, fl.snow + dt * .05);
       // Now and then in a heavy downpour the sky flickers white, and thunder rolls in a moment later.
@@ -1137,7 +1193,7 @@
       } else this.nextBolt = Math.max(this.nextBolt, 8 + rnd() * 12);
       let flash = 0;
       for (const [t0, k] of this.bolts) { const t = this.time - t0; if (t >= 0) flash += k * Math.min(1, t / .025) * Math.exp(-t * 14); }
-      this.bolts = this.bolts.filter(([t0]) => this.time - t0 < 1.2);
+      keep(this.bolts, ([t0]) => this.time - t0 < 1.2);
       this.look.flash = flash * .3;
       // Snow in depth: many small far flakes, fewer large soft near ones, all carried by the wind;
       // each settles on the water, shrinks as it melts and leaves a faint ring.
@@ -1174,7 +1230,7 @@
       p.turnIn -= dt;
       if (p.turnIn <= 0) { p.aim = p.flow + (this.rnd()-.5)*2.4; p.turnIn = 6+this.rnd()*12; }
       p.flow += wrap(p.aim-p.flow)*(1-Math.exp(-dt*.18));
-      const habitat = this.sim.habitat, room = habitat.sample(p.x,p.y), gust = .8+this.look.wave*.3;
+      const habitat = this.sim.habitat, room = habitat.sample(p.x,p.y,this.driftSample), gust = .8+this.look.wave*.3;
       const speed = p.speed*unit*gust, breeze = this.time*.035;
       let vx = (Math.cos(p.flow)+Math.sin(breeze)*.35)*speed, vy = (Math.sin(p.flow)+Math.cos(breeze*.73)*.22)*speed;
       const near = clamp(1-(room.distance-p.r)/(24*unit),0,1);
@@ -1188,7 +1244,7 @@
         const x=p.x+p.vx*dt/steps,y=p.y+p.vy*dt/steps;
         if (habitat.contains(x,y,p.r)) { p.x=x; p.y=y; }
         else {
-          const edge=habitat.sample(x,y),out=p.vx*edge.nx+p.vy*edge.ny;
+          const edge=habitat.sample(x,y,this.driftSample),out=p.vx*edge.nx+p.vy*edge.ny;
           if(out<0){p.vx-=edge.nx*out*1.4;p.vy-=edge.ny*out*1.4;}
           p.aim=Math.atan2(edge.ny,edge.nx)+(this.rnd()-.5)*.8;p.turnIn=4+this.rnd()*6;
           break;
@@ -1197,7 +1253,7 @@
       p.a = wrap(p.a+(p.spin+Math.sin(this.time*.17+p.phase)*.025)*dt);
     }
     updatePlants(dt) {
-      this.plantRipples = this.plantRipples.filter(hit => {
+      keep(this.plantRipples, hit => {
         if (hit.at > this.time) return true;
         const { p, k, nx, ny } = hit;
         p.vx += nx * k * 16; p.vy += ny * k * 13;
@@ -1287,9 +1343,16 @@
     draw(settings) {
       const R = this.R, look = this.look, { w, h, scale } = this, sim = this.sim;
       // Underwater, deepest first.
-      const items = sim.fish.map((f, i) => ({ d: f.depth ?? .5, f, i }));
-      if (settings.turtles) for (const t of this.turtles) items.push({ d: t.depth + .02, t });
-      items.sort((a, b) => b.d - a.d);
+      const items = this.depthItems; let count = 0;
+      for (let i = 0; i < sim.fish.length; i++) {
+        const f = sim.fish[i], item = items[count] || (items[count] = {});
+        item.d = f.depth ?? .5; item.f = f; item.i = i; item.t = null; count++;
+      }
+      if (settings.turtles) for (const t of this.turtles) {
+        const item = items[count] || (items[count] = {});
+        item.d = t.depth + .02; item.t = t; item.f = null; item.i = 0; count++;
+      }
+      items.length = count; items.sort((a, b) => b.d - a.d);
       for (const it of items) { if (it.t) it.t.draw(R, w, h, scale, look); else if (it.f.spriteReady && it.f.spine) this.koi(it.f, it.i); }
       // Leaves bob, pennywort and buds sway on their stalks, flowers nod; wind and rain stir them a little more.
       const t = this.time, gust = .8 + look.wave * .45;
@@ -1416,10 +1479,13 @@
     if (!tintedFins.has(key)) { const c = document.createElement('canvas'); c.width = def.canvas.width; c.height = def.canvas.height; const x = c.getContext('2d'); x.drawImage(def.canvas, 0, 0); x.globalCompositeOperation = 'source-atop'; x.globalAlpha = solid ? 1 : .75; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height); tintedFins.set(key, c); }
     return tintedFins.get(key);
   }
+  const previewFish = { spine: new Float32Array((BODY.segments + 1) * 2), amp: 0, phase: 0 };
+  const previewPose = new Float32Array((BODY.segments + 1) * 4);
   function drawKoi2D(ctx, f, sprite, sprites, x, y, angle, s, amp = .4) {
-    const n = BODY.segments, seg = BODY.length / n, spine = new Float32Array((n + 1) * 2), c = Math.cos(angle), si = Math.sin(angle);
+    const n = BODY.segments, seg = BODY.length / n, spine = previewFish.spine, c = Math.cos(angle), si = Math.sin(angle);
     for (let i = 0; i <= n; i++) { spine[i * 2] = x + c * (BODY.nose - i * seg) * s; spine[i * 2 + 1] = y + si * (BODY.nose - i * seg) * s; }
-    const pose = fishPose({ spine, amp, phase: f.phase || 0 }, s), pal = fishPalette(f);
+    previewFish.amp = amp; previewFish.phase = f.phase || 0;
+    const pose = fishPose(previewFish, s, previewPose), pal = fishPalette(f);
     const finDef = sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'], fin = pal.kind === 'utsuri' ? finDef.canvas : tintedFin(finDef, pal.fin, pal.kind === 'benigoi');
     for (const [i, spread, size] of [[8, .6, .58], [4, 1, 1]]) {
       const px = pose[i * 4], py = pose[i * 4 + 1], nx = pose[i * 4 + 2], ny = pose[i * 4 + 3], heading = Math.atan2(-nx, ny), hw = halfWidth(BODY.nose - i * seg, girthOf(f.seed)) * s * .8;

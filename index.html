@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#738c7c" />
   <meta name="description" content="一方碧潭，片刻闲心。投喂锦鲤、听雨观鱼，拥有属于自己的小小池塘。" />
-  <title>摸鱼 · 一方池塘，片刻闲心</title>
+  <title>MoYu · 一方池塘，片刻闲心</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
   <!-- The first weather call used to pay for a cold TLS handshake on the far side of the world, which
        took longer than the request itself. Opening the sockets while the pond is still loading spends
@@ -24,7 +24,7 @@
   <script src="audio.js" defer></script>
   <script>/* The panel window shows a panel only, so its artwork is skipped: it makes the first tap open sooner. */
     if(!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-data.js" defer><\/script>');
-    /* file:// pages cannot upload an <img> to WebGL, so they take the inlined 8K beds; http(s) loads the PNGs. */
+    /* file:// pages cannot upload an <img> to WebGL, so they take the inlined 4K PNG beds; http(s) loads the PNGs. */
     if(location.protocol==='file:'&&!/[?&]mode=panel\b/.test(location.search))document.write('<script src="assets/pond-bed.js" defer><\/script>');</script>
   <script src="app.js" defer></script>
 </head>

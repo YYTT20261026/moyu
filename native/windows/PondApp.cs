@@ -1,4 +1,4 @@
-// 碧池观鱼 · the Windows app: the pond as the desktop wallpaper on every screen, a tray icon to control it, and an
+// MoYu · the Windows app: the pond as the desktop wallpaper on every screen, a tray icon to control it, and an
 // interactive window. Every save one pond page makes is passed to the others, so they stay in step.
 using System;
 using System.Collections.Generic;
@@ -21,8 +21,6 @@ namespace BichiPond
         // Legacy: pages used to ask the host to open the interactive window at a panel; the wallpaper's card
         // now opens its panel in place, so this only serves a page left open from an older build.
         private const string PanelRequest = "panel:";
-        // TEMP DIAGNOSTIC: the page's tap trace, written to %LOCALAPPDATA%\BichiPond\pond-debug.log.
-        private const string DebugRequest = "dbg:";
         private readonly List<WallpaperForm> walls = new List<WallpaperForm>();
         private readonly NotifyIcon tray = new NotifyIcon();
         private ToolStripMenuItem soundItem;
@@ -33,8 +31,16 @@ namespace BichiPond
         private CoreWebView2Environment env;
         private InteractiveForm window;
         private PanelForm panelWindow;
-        private bool userPaused, locked, rebuilding, quitting, soundOn, opening;
+        private bool userPaused, locked, rebuilding, quitting, soundOn, opening, rebuildPending;
+        private int rebuildDelay;
+        private WallpaperForm buildingWall;
+        private readonly System.Threading.CancellationTokenSource lifetime = new System.Threading.CancellationTokenSource();
+        private System.Threading.SynchronizationContext uiContext;
         private string screenSignature = "";
+        // "single" keeps the pond on the primary screen, "multi" gives every screen its own, "shared" spans
+        // the whole virtual desktop with one pond. Stored beside the WebView2 data so the first build after
+        // boot already uses the last choice instead of waiting for a page to save it.
+        private string screenMode = LoadScreenMode();
         private string season = "spring";
         private string weather = "sunny";
         private bool night;
@@ -76,20 +82,22 @@ namespace BichiPond
             {
                 kickoff.Stop(); kickoff.Dispose();
                 try { await Start(); }
-                catch (Exception ex) { Report("启动失败", ex); Quit(); }
+                catch (Exception ex) { if (!quitting) { Report("启动失败", ex); Quit(); } }
             };
             kickoff.Start();
         }
 
         private async Task Start()
         {
+            if (quitting) return;
+            uiContext = System.Threading.SynchronizationContext.Current;
             string runtime = null;
             try { runtime = CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch (WebView2RuntimeNotFoundException) { }
             if (string.IsNullOrEmpty(runtime))
             {
-                if (MessageBox.Show("摸鱼需要 Microsoft Edge WebView2 运行时（Windows 11 自带，Windows 10 多数已通过更新安装）。\n\n现在打开下载页面吗？", "摸鱼", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                if (MessageBox.Show("MoYu 需要 Microsoft Edge WebView2 运行时（Windows 11 自带，Windows 10 多数已通过更新安装）。\n\n现在打开下载页面吗？", "MoYu", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     PondPage.OpenInBrowser("https://developer.microsoft.com/microsoft-edge/webview2/");
-                ExitThread();
+                Quit();
                 return;
             }
             string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond", "WebView2");
@@ -99,8 +107,14 @@ namespace BichiPond
             // which is why sound only ever worked there.
             var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
             env = await CoreWebView2Environment.CreateAsync(null, data, options);
+            if (quitting) return;
             screenSignature = CurrentScreenSignature();
-            await BuildWallpapers();
+            // 首次构建也占用同一串行锁；其间到达的重建请求留在 pending 中。
+            rebuilding = true;
+            try { await BuildWallpapers(); }
+            finally { rebuilding = false; }
+            if (quitting) return;
+            if (rebuildPending) Rebuild(rebuildDelay);
             hookProc = OnMouse;
             hook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, hookProc, Native.GetModuleHandle(null), 0);
             keyProc = OnKey;
@@ -111,27 +125,94 @@ namespace BichiPond
 
         private async Task BuildWallpapers()
         {
+            if (quitting) return;
             // After an Explorer restart these windows are already gone with the old desktop; just let them go.
             foreach (var w in walls) { try { w.Close(); w.Dispose(); } catch (Exception) { } }
             walls.Clear();
             if (!Desktop.Find()) return;
-            foreach (var m in Native.Monitors())
+            var targets = new List<Tuple<string, Rectangle, Rectangle>>();
+            if (screenMode == "shared")
             {
-                var wall = new WallpaperForm(m.Item1, m.Item2, m.Item3);
-                walls.Add(wall);
-                await wall.Start(env, OnSave, OnProcessFailed);
+                // One window over the whole virtual desktop, so the painting is continuous and a koi can
+                // swim from one monitor to the next. Work area == bounds: the card keeps to the edge of the
+                // combined desktop rather than to one screen's taskbar.
+                Rectangle all = SystemInformation.VirtualScreen;
+                targets.Add(Tuple.Create("shared", all, all));
             }
+            else
+            {
+                var monitors = Native.Monitors();
+                if (screenMode == "single")
+                {
+                    string primary = Screen.PrimaryScreen?.DeviceName;
+                    var only = monitors.FirstOrDefault(m => m.Item1 == primary) ?? monitors.FirstOrDefault();
+                    if (only != null) monitors = new List<Tuple<string, Rectangle, Rectangle>> { only };
+                }
+                targets.AddRange(monitors);
+            }
+            Exception first = null;
+            foreach (var m in targets)
+            {
+                if (quitting) return;
+                var wall = new WallpaperForm(m.Item1, m.Item2, m.Item3);
+                buildingWall = wall;
+                try
+                {
+                    await wall.Start(env, OnSave, OnProcessFailed);
+                    if (quitting)
+                    {
+                        try { wall.Close(); wall.Dispose(); } catch (Exception) { }
+                        return;
+                    }
+                    walls.Add(wall);
+                }
+                catch (Exception ex)
+                {
+                    try { wall.Close(); wall.Dispose(); } catch (Exception) { }
+                    if (quitting) return;
+                    // A screen whose WebView2 cannot be built must not stay in the list: AnyWallpaperLost would
+                    // read it as a lost pond every 300 ms, rebuild, fail again — an endless rebuild (and dialog).
+                    first = first ?? ex;
+                    Note($"screen {m.Item1}: pond window failed — {ex.Message}");
+                }
+                finally { buildingWall = null; }
+            }
+            // If every screen failed there is nothing left to watch; report it once instead of looping.
+            if (walls.Count == 0 && first != null) throw first;
             UpdateVisibility();
         }
 
         // Screens changed, or Explorer restarted and took the desktop layers (and our wallpapers) with it.
-        private async void Rebuild(int delay)
+        private void Rebuild(int delay)
         {
-            if (rebuilding || env == null) return;
+            if (quitting || env == null) return;
+            // SystemEvents 可能来自非 UI 线程，所有 pending 和窗口操作都回到同一消息循环。
+            if (System.Threading.SynchronizationContext.Current != uiContext)
+            {
+                uiContext.Post(_ => Rebuild(delay), null);
+                return;
+            }
+            rebuildDelay = rebuildPending ? Math.Min(rebuildDelay, delay) : delay;
+            rebuildPending = true;
+            if (!rebuilding) _ = RebuildPending();
+        }
+
+        private async Task RebuildPending()
+        {
             rebuilding = true;
-            await Task.Delay(delay);
-            try { await BuildWallpapers(); }
-            catch (Exception ex) { Report("桌面壁纸重建失败", ex); }
+            try
+            {
+                while (rebuildPending && !quitting)
+                {
+                    int delay = rebuildDelay;
+                    rebuildPending = false;
+                    await Task.Delay(delay, lifetime.Token);
+                    if (quitting) return;
+                    try { await BuildWallpapers(); }
+                    catch (Exception ex) { if (!quitting) Report("桌面壁纸重建失败", ex); }
+                }
+            }
+            catch (OperationCanceledException) { }
             finally { rebuilding = false; }
         }
 
@@ -142,6 +223,7 @@ namespace BichiPond
         // never come back. Rebuilding every screen covers both kinds, and any number of lost views at once.
         private void OnProcessFailed(WebView2 view, CoreWebView2ProcessFailedKind kind)
         {
+            if (quitting) return;
             Note($"WebView2 进程失败：{kind}");
             if (kind != CoreWebView2ProcessFailedKind.BrowserProcessExited)
             {
@@ -158,25 +240,24 @@ namespace BichiPond
         // the desktop for nothing.
         private bool AnyWallpaperLost()
         {
-            if (rebuilding || opening || walls.Count == 0) return false;
+            if (quitting || rebuilding || opening || walls.Count == 0) return false;
             foreach (var w in walls) if (w.View?.CoreWebView2 == null) return true;
             return window != null && !window.IsDisposed && window.View?.CoreWebView2 == null;
         }
 
-        private IEnumerable<WebView2> Views => walls.Select(w => w.View).Concat(new[] { window?.View }).Where(v => v?.CoreWebView2 != null);
+        private IEnumerable<WebView2> Views => walls.Select(w => w.View).Concat(new[] { window?.View, panelWindow?.View }).Where(v => v?.CoreWebView2 != null);
 
         // A page saved the pond: hand the same save to every other page, and note the weather for the menu.
         private void OnSave(WebView2 from, string json)
         {
+            if (quitting) return;
             // The wallpaper's corner card asks for a panel: open the interactive window straight into it.
             if (json?.StartsWith(PanelRequest) == true)
             {
                 string name = json.Substring(PanelRequest.Length);
-                DebugLog.Write("panel requested: " + name);
                 if (name == "fish" || name == "weather" || name == "settings") MainThread(() => ShowPanel(name));
                 return;
             }
-            if (json?.StartsWith(DebugRequest) == true) { DebugLog.Write(json.Substring(DebugRequest.Length)); return; }
             string call = "window.__pondSync&&__pondSync(" + PondPage.JsString(json) + ")";
             foreach (var v in Views) if (v != from) _ = v.CoreWebView2.ExecuteScriptAsync(call);
             var se = Regex.Match(json, "\"season\":\"(\\w+)\"");
@@ -187,6 +268,15 @@ namespace BichiPond
             if (n.Success) night = n.Groups[1].Value == "true";
             var s = Regex.Match(json, "\"soundOn\":(true|false)");
             if (s.Success) soundOn = s.Groups[1].Value == "true";
+            var mode = Regex.Match(json, "\"screenMode\":\"(single|multi|shared)\"");
+            if (mode.Success && mode.Groups[1].Value != screenMode)
+            {
+                screenMode = mode.Groups[1].Value;
+                SaveScreenMode(screenMode);
+                Note($"screen mode: {screenMode}");
+                // Leave the WebView2 message callback before its own window is closed by the rebuild.
+                Rebuild(150);
+            }
         }
 
         // A menu command goes to one page (the interactive window if open); its save carries the change to the others.
@@ -198,14 +288,19 @@ namespace BichiPond
 
         private static void SetPaused(WallpaperForm wall, bool paused)
         {
-            if (wall.View?.CoreWebView2 == null || wall.Paused == paused) return;
-            wall.Paused = paused;
-            _ = wall.View.CoreWebView2.ExecuteScriptAsync(paused ? "window.pondControl&&pondControl.pause(true)" : "window.pondControl&&pondControl.pause(false)");
+            // 即使页面未就绪或上次发送失败，也保留期望并让 watch 再次触发同步。
+            wall.SetPaused(paused);
         }
 
         // Each screen's pond rests while nobody can see it: a maximised or full-screen app over it, or the session locked.
         private void UpdateVisibility()
         {
+            if (quitting) return;
+            if (uiContext != null && System.Threading.SynchronizationContext.Current != uiContext)
+            {
+                uiContext.Post(_ => UpdateVisibility(), null);
+                return;
+            }
             // The desktop's geometry can change without DisplaySettingsChanged firing — a remote session
             // resizing its virtual display, say — which would leave the pond sized for the old screen (its
             // controls hanging off the edge). Compare the screens once a second and re-attach when they move.
@@ -226,7 +321,7 @@ namespace BichiPond
             }
             foreach (var w in walls)
             {
-                bool coveredHere = covering != IntPtr.Zero && Screen.FromHandle(covering).DeviceName == w.DeviceName;
+                bool coveredHere = covering != IntPtr.Zero && (w.DeviceName == "shared" || Screen.FromHandle(covering).DeviceName == w.DeviceName);
                 w.SetHidden(locked || coveredHere);
                 // Paused is the only thing that stops the page drawing: a covered or locked screen keeps its
                 // last frame on the desktop, so nothing flashes when the app in front goes away.
@@ -238,6 +333,32 @@ namespace BichiPond
         private static string CurrentScreenSignature()
         {
             return string.Join("|", Native.Monitors().Select(m => $"{m.Item2.X},{m.Item2.Y},{m.Item2.Width},{m.Item2.Height}").OrderBy(s => s));
+        }
+
+        /// <summary>Next to the WebView2 data: the last screen mode survives a restart, so boot does not
+        /// build the wrong layout first and rebuild a moment later.</summary>
+        private static string ScreenModeFile => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond", "screen-mode.txt");
+
+        private static string LoadScreenMode()
+        {
+            try
+            {
+                string saved = File.ReadAllText(ScreenModeFile).Trim();
+                if (saved == "single" || saved == "multi" || saved == "shared") return saved;
+            }
+            catch (Exception) { }
+            return "single";
+        }
+
+        private static void SaveScreenMode(string mode)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ScreenModeFile));
+                File.WriteAllText(ScreenModeFile, mode);
+            }
+            catch (Exception) { }
         }
 
         private static bool IsShell(IntPtr hwnd)
@@ -327,7 +448,6 @@ namespace BichiPond
         // A tap on the desktop's icon layer reaches the whole pond. One that landed through a see-through window
         // lying over it (a desktop clock, a date widget) reaches the card's controls only.
         bool desktop = IsDesktopLayer(under, underClass), overlay = !desktop && IsOverlay(under);
-        DebugLog.Write($"click at {pt.X},{pt.Y} under={underClass ?? "?"}{(desktop ? "" : overlay ? " through an overlay" : " not the desktop")}");
         if (!desktop && !overlay) return;
         var p = new Point(pt.X, pt.Y);
         walls.FirstOrDefault(w => w.ScreenBounds.Contains(p))?.Tap(p, !desktop);
@@ -339,13 +459,11 @@ namespace BichiPond
             hold.Stop();
             if (!pressed || moved) return;
             var pt = downAt;
-            DebugLog.Write($"hold at {pt.X},{pt.Y}");
             MainThread(() => SendToDesktop(pt, (w, p) => w.Hold(p)));
         }
 
         private void DoubleTapAt(Native.POINT pt)
         {
-            DebugLog.Write($"double tap at {pt.X},{pt.Y}");
             SendToDesktop(pt, (w, p) => w.DoubleTap(p));
         }
 
@@ -419,7 +537,7 @@ namespace BichiPond
         {
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond"), log = Path.Combine(dir, "error.log");
             try { Directory.CreateDirectory(dir); File.AppendAllText(log, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what} (Windows {Environment.OSVersion.Version})\r\n{ex}\r\n\r\n"); } catch (Exception) { }
-            MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "摸鱼", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "MoYu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         /// <summary>Records something worth knowing without interrupting anyone: a lost WebView2 process is recovered on its
@@ -435,9 +553,9 @@ namespace BichiPond
         private void BuildTray()
         {
             tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            tray.Text = "摸鱼";
+            tray.Text = "MoYu";
             var menu = new ContextMenuStrip();
-            menu.Items.Add(new ToolStripMenuItem("摸鱼") { Enabled = false });
+            menu.Items.Add(new ToolStripMenuItem("MoYu") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开交互窗口", null, (s, e) => OpenWindow());
             // Four seasons first, then the weather that can be layered on top of each.
@@ -461,7 +579,7 @@ namespace BichiPond
             var startup = new ToolStripMenuItem("开机时启动", null, (s, e) => SetStartup(!IsStartup()));
             menu.Items.Add(startup);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出摸鱼", null, (s, e) => Quit());
+            menu.Items.Add("退出 MoYu", null, (s, e) => Quit());
             menu.Opening += (s, e) =>
             {
                 foreach (ToolStripItem i in seasonMenu.DropDownItems) if (i is ToolStripMenuItem mi && mi.Tag is string v) mi.Checked = v == season;
@@ -478,18 +596,20 @@ namespace BichiPond
         /// panel only moves it into place and tells the page which one to show.</summary>
         private async void ShowPanel(string panel)
         {
-            if (env == null) return;
+            if (quitting || env == null) return;
             var form = panelWindow;
             if (form == null || form.IsDisposed)
             {
-                if (form != null) form.Close();
+                // Never Close() a disposed form: the window is gone already, so only the stale field is cleared.
+                if (panelWindow == form) panelWindow = null;
                 form = NewPanelWindow();
             }
             // A first tap can arrive while the background prewarm is still loading: wait for that same load.
             try { await form.EnsurePrepared(env, PanelSaved); }
-            catch (Exception ex) { DebugLog.Write("panel prepare failed: " + ex.Message); return; }
+            catch (Exception ex) { if (!quitting) Note("panel prepare failed: " + ex.Message); return; }
+            if (quitting || form.IsDisposed) return;
             try { await form.Open(panel); }
-            catch (Exception ex) { DebugLog.Write("panel open failed: " + ex.Message); }
+            catch (Exception ex) { Note("panel open failed: " + ex.Message); }
         }
 
         // Panel pages save the pond like any other; closing one asks for the window to go away.
@@ -519,14 +639,15 @@ namespace BichiPond
         /// hidden. The first tap on the card then opens instantly instead of waiting for a page to load.</summary>
         private async void PrewarmPanel()
         {
-            if (env == null || panelWindow != null) return;
-            await Task.Delay(200); // let the wallpapers start loading first
-            if (panelWindow != null) return;
+            if (quitting || env == null || panelWindow != null) return;
+            try { await Task.Delay(200, lifetime.Token); }
+            catch (OperationCanceledException) { return; }
+            if (quitting || panelWindow != null) return;
             var form = NewPanelWindow();
             try { await form.EnsurePrepared(env, PanelSaved); }
             catch (Exception ex)
             {
-                DebugLog.Write("panel prewarm failed: " + ex.Message);
+                if (!quitting) Note("panel prewarm failed: " + ex.Message);
                 if (panelWindow == form) panelWindow = null;
                 form.Dispose();
             }
@@ -534,7 +655,7 @@ namespace BichiPond
 
         public async void OpenWindow(string panel = null)
         {
-            if (env == null) return;
+            if (quitting || env == null) return;
             if (window != null && !window.IsDisposed)
             {
                 window.WindowState = window.WindowState == FormWindowState.Minimized ? FormWindowState.Normal : window.WindowState;
@@ -569,7 +690,11 @@ namespace BichiPond
         {
             if (quitting) return;
             quitting = true;
+            rebuildPending = false;
+            lifetime.Cancel();
             watch.Stop();
+            hold.Stop();
+            if (buildingWall != null) { try { buildingWall.Close(); buildingWall.Dispose(); } catch (Exception) { } }
             if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
             if (keyHook != IntPtr.Zero) Native.UnhookWindowsHookEx(keyHook);
             tray.Visible = false;

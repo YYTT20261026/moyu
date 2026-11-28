@@ -32,7 +32,7 @@ const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={season:'spring',weather:'sunny',speed:1,turtles:true,crabs:true,butterflies:true,names:false,chat:false,quality:'high',displayMode:'auto',autoWeather:false,location:null,night:false,feedMode:true,...PondAudio.NATURE_DEFAULTS,rainAmount:.5,snowAmount:.5,soundOn:false,cardCollapsed:false};
+const defaults={season:'spring',weather:'sunny',speed:1,turtles:true,crabs:true,butterflies:true,names:false,chat:false,quality:'high',displayMode:'auto',screenMode:'single',screenModeSet:false,autoWeather:false,location:null,night:false,feedMode:true,...PondAudio.NATURE_DEFAULTS,rainAmount:.5,snowAmount:.5,soundOn:false,cardCollapsed:false};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
 function readSettings(src){for(const key of ['turtles','crabs','butterflies','names','chat','autoWeather','night','feedMode','sfx','water','weatherSound','soundOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
@@ -43,6 +43,9 @@ function readSettings(src){for(const key of ['turtles','crabs','butterflies','na
   settings.speed=clamp(Number(src.speed)||1,.3,2);
   if(['high','eco'].includes(src.quality))settings.quality=src.quality;
   if(['auto','dual','portrait'].includes(src.displayMode))settings.displayMode=src.displayMode;
+  // Only a person's own pick beats the default: older saves carry the previous default ("multi")
+  // without this marker, and should start on the new default instead of staying multi-screen.
+  if(src.screenModeSet===true){settings.screenModeSet=true;if(['single','multi','shared'].includes(src.screenMode))settings.screenMode=src.screenMode;}
   const l=src.location;if(l&&typeof l.name==='string'&&Number.isFinite(l.latitude)&&Number.isFinite(l.longitude))settings.location={name:l.name.slice(0,80),latitude:clamp(l.latitude,-90,90),longitude:clamp(l.longitude,-180,180)};
   PondAudio.applyNaturePreset(settings,src);
 }
@@ -74,17 +77,47 @@ function syncAutoNight(now = Date.now()) {
 }
 function dayKey(){return new Date().toLocaleDateString('en-CA');}
 let daily=saved?.daily?.date===dayKey()?{date:dayKey(),count:clamp(Number(saved.daily.count)||0,0,999999)}:{date:dayKey(),count:0};
+// Resolve the page role before allocating artwork, audio or canvases.
+const pageMode=new URLSearchParams(location.search).get('mode');
+const wallpaperMode=pageMode==='wallpaper';
+const cornerMode=pageMode==='corner';
+const panelMode=pageMode==='panel';
+const desktopHost=!!window.chrome?.webview||!!window.webkit?.messageHandlers?.pond;
+const lightBackdrops=wallpaperMode||cornerMode||matchMedia('(pointer: coarse)').matches;
+// Only the desktop corner page gets a CPU cache budget; Android's existing policy is unchanged.
+const budgetBackdrops=cornerMode&&!!window.chrome?.webview;
+const BACKGROUND_BUDGET=64*1024*1024;
+if(wallpaperMode)document.body.classList.add('wallpaper');
+if(panelMode)document.body.classList.add('panel-only');
+const prefersReduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(prefersReduced&&!saved){settings.speed=.4;settings.quality='eco';document.body.classList.add('reduced-motion');}
 // A first visit gets the same 24 koi in every window that opens at once (each desktop screen, say), so they agree from the start.
 const fish=saved?.fish||Array.from({length:24},(_,i)=>({...createFish(i,randomSeed(i*7+3)),id:`koi-${i+1}`}));
 const sound=new PondAudio.PondAudio();sound.configure(settings);
-let canvas=$('#world');const labels=$('#labels'),labelCtx=labels.getContext('2d');
+let canvas=$('#world');const labels=$('#labels');let labelCtx=null;
 const simulation=new PondSimulation(fish,innerWidth,innerHeight,Math.random);
-let width=innerWidth,height=innerHeight,dpr=1,feedMode=settings.feedMode,zen=false,paused=false,activePanel='',last=0,time=0,lastFrame=0,hostFps=60;
+let width=innerWidth,height=innerHeight,dpr=1,feedMode=settings.feedMode,zen=false,paused=!!window.__pondDesiredPaused,activePanel='',last=0,time=0,lastFrame=0,hostFps=60;
 let previewFish=null,previewCanvas=null,previewSprite=null,previewKey='',weatherData=null,toastTimer=0,persistTimer=0,weatherRequest=0,citySearchController=null,compareWith=null;
-let renderer=null,scene=null,bedImage=null;const sprites=PondArt.miscSprites(),spriteCache=new Map(),PREVIEW_K=4.6;
+let renderer=null,scene=null,bedImage=null,force2D=false,pondFrameReady=false;
+const sprites=PondArt.miscSprites(panelMode),spriteCache=new Map(),PREVIEW_K=4.6;
 let backgroundSeason=null,pendingSeason=null,seasonRequest=0,lotusArtworkReady=false;
 const backgroundCache=new Map();
 const backgroundMasks=new Map();
+const backgroundSizes=new Map();
+function trimBackgroundCache(){
+  if(!budgetBackdrops)return;
+  let bytes=0;
+  for(const [season,size] of backgroundSizes){const mask=backgroundMasks.get(season);bytes+=size+(mask?mask.width*mask.height*4:0);}
+  // Current and in-flight selected seasons are pinned. The temporary two-season switch peak is intentional.
+  for(const season of backgroundCache.keys()){
+    if(season===backgroundSeason||season===pendingSeason)continue;
+    if(bytes<=BACKGROUND_BUDGET&&backgroundSizes.has(season))continue;
+    const mask=backgroundMasks.get(season);
+    bytes-=(backgroundSizes.get(season)||0)+(mask?mask.width*mask.height*4:0);
+    backgroundCache.delete(season);backgroundSizes.delete(season);backgroundMasks.delete(season);
+    if(mask){mask.width=mask.height=1;}
+  }
+}
 let backgroundWarmGeneration=0;
 function backgroundMask(season,image){
   if(!backgroundMasks.has(season))backgroundMasks.set(season,PondScene.floatMask(image.naturalWidth,image.naturalHeight,season,image));
@@ -92,6 +125,7 @@ function backgroundMask(season,image){
 }
 const inIdle=job=>window.requestIdleCallback?requestIdleCallback(job,{timeout:1500}):setTimeout(job,120);
 function warmBackgrounds(){
+  if(lightBackdrops||panelMode)return;
   const generation=++backgroundWarmGeneration;
   const remaining=Object.keys(SEASONS).filter(s=>s!==backgroundSeason);
   const next=()=>inIdle(async()=>{
@@ -109,19 +143,6 @@ function warmBackgrounds(){
   });
   next();
 }
-const prefersReduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
-// ?mode=wallpaper: the pond as a desktop or phone live wallpaper. No controls (the home screen has its own);
-// taps on empty desktop space arrive through pondTap. The host stops drawing it whenever it is hidden.
-const wallpaperMode=new URLSearchParams(location.search).get('mode')==='wallpaper';
-if(wallpaperMode)document.body.classList.add('wallpaper');
-// ?mode=corner: the Windows desktop wallpaper keeps its corner card (clock, weather, dock). Taps on empty
-// desktop space arrive through the host's mouse hook, just as on the pond itself: one on a control acts on
-// it, and a panel button asks the host for that panel's own small window, which sits above the desktop icons.
-const cornerMode=new URLSearchParams(location.search).get('mode')==='corner';
-// ?mode=panel: that small window — nothing but one panel, filling the frame, no pond and no card behind it.
-const panelMode=new URLSearchParams(location.search).get('mode')==='panel';
-if(panelMode)document.body.classList.add('panel-only');
-if(prefersReduced&&!saved){settings.speed=.4;settings.quality='eco';document.body.classList.add('reduced-motion');}
 // Several pages can share one pond (the desktop wallpaper on each screen plus its interactive window, the Android
 // wallpaper and its app, or browser tabs); each host passes a page's saves to the others (see __pondSync).
 // rev stamps the last change a person made (settings, names, fish added or let go); eating only bumps counts, which merge.
@@ -149,12 +170,12 @@ function applyExternalSave(raw){let data;try{data=JSON.parse(raw);}catch{return;
   if(s.daily?.date===daily.date)daily.count=Math.max(daily.count,clamp(Number(s.daily.count)||0,0,999999));
   if(newer){rev=Number(data.rev);const quality=settings.quality,auto=settings.autoWeather;readSettings(s.settings);setFeedMode(settings.feedMode);
     const next=s.fish.map(src=>{const f=byId.get(src.id);if(!f)return src;const look=f.palette!==src.palette||f.seed!==src.seed||f.size!==src.size||marksHash(f.marks)!==marksHash(src.marks);
-      Object.assign(f,{name:src.name,palette:src.palette,size:src.size,baseSize:src.baseSize,growthBase:src.growthBase||0,seed:src.seed,marks:src.marks,eaten:Math.max(f.eaten,src.eaten)});if(look)f.spriteReady=false;return f;});
+      Object.assign(f,{name:src.name,palette:src.palette,size:src.size,baseSize:src.baseSize,growthBase:src.growthBase||0,seed:src.seed,marks:src.marks,friend:src.friend,eaten:Math.max(f.eaten,src.eaten)});if(look)f.spriteReady=false;return f;});
     for(const f of simulation.fish)if(!next.includes(f)&&scene){scene.drop(f.x*width,f.y*height,12*scene.scale,.8);scene.wakes.delete(f);}
     simulation.fish.splice(0,simulation.fish.length,...next);simulation.fish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
     if(settings.quality!==quality)resize();applyWeather();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
   }else for(const src of s.fish){const f=byId.get(src.id);if(f)f.eaten=Math.max(f.eaten,src.eaten);}
-  editSig=editSignature();updateMeta();}
+  editSig=editSignature();updateMeta();if(panelMode&&activePanel==='fish'&&$('#fish-grid'))renderCollection();}
 window.__pondSync=applyExternalSave;
 addEventListener('storage',e=>{if(e.key==='bichi-pond-v1'&&e.newValue)applyExternalSave(e.newValue);});
 function scheduleSave(){clearTimeout(persistTimer);persistTimer=setTimeout(persist,500);}
@@ -175,23 +196,38 @@ const perf={t:0,n:0,level:0,scales:[1,.72,.5]};
 const targetFps=()=>Math.min(hostFps,settings.quality==='eco'?30:60);
 function syncBackdrop(){
   const bed=$('.pond-bed');
-  if(renderer?.kind!=='2d'){
+  if(!renderer){
     for(const key of ['width','height','transform','transformOrigin','backgroundSize'])bed.style[key]='';
     return;
   }
-  // The Canvas foreground mask, koi and CSS painting must share the same portrait turn/crop.
+  // Match the CSS painting to the renderer, including its portrait turn/crop.
   const W=POND_MAP.width,H=POND_MAP.height,o=renderer.imageToScreen(0,0);
   const x=renderer.imageToScreen(W,0),y=renderer.imageToScreen(0,H);
   Object.assign(bed.style,{width:`${W}px`,height:`${H}px`,backgroundSize:'100% 100%',transformOrigin:'0 0',
     transform:`matrix(${(x[0]-o[0])/W},${(x[1]-o[1])/W},${(y[0]-o[0])/H},${(y[1]-o[1])/H},${o[0]},${o[1]})`});
 }
+let resizeHandle=0,layoutKey='',layoutRenderer=null;
+function syncLabelCanvas(active=!panelMode&&(settings.names||!!scene?.chats?.length)){
+  const w=active?Math.max(1,Math.round(width*dpr)):1,h=active?Math.max(1,Math.round(height*dpr)):1;
+  if(labels.width!==w)labels.width=w;
+  if(labels.height!==h)labels.height=h;
+  if(active&&!labelCtx)labelCtx=labels.getContext('2d');
+  if(!active)labels.dataset.on='';
+  return active;
+}
 function resize(){
   width=innerWidth;height=innerHeight;dpr=settings.quality==='eco'?1:Math.max(1,Math.min(devicePixelRatio||1,3)*perf.scales[perf.level]);
   simulation.width=width;simulation.height=height;simulation.scale=clamp(Math.min(width,height)/720,.66,1.25);
-  labels.width=Math.round(width*dpr);labels.height=Math.round(height*dpr);
-  if(renderer){renderer.resize(width,height,dpr,settings.quality,settings.displayMode);syncBackdrop();scene.layout(width,height);}
+  syncLabelCanvas();
+  if(renderer){
+    try{renderer.resize(width,height,dpr,settings.quality,settings.displayMode);}
+    catch(error){recoverRenderer(error);return;}
+    const key=`${width}:${height}:${settings.displayMode}`;
+    if(layoutKey!==key||layoutRenderer!==renderer){layoutKey=key;layoutRenderer=renderer;syncBackdrop();scene.layout(width,height);}
+  }
 }
-addEventListener('resize',resize);resize();
+function requestResize(){if(resizeHandle)return;resizeHandle=requestAnimationFrame(()=>{resizeHandle=0;resize();});}
+addEventListener('resize',requestResize);resize();
 // Sprites are keyed by what they depict; pond fish never change after creation, the preview does.
 function marksHash(marks){let h=marks?marks.length:0;if(marks)for(const m of marks)h=(h*31+Math.round(m.x*10)*7+Math.round(m.y*10)*13+m.r*17+parseInt(m.color.slice(1),16))|0;return h;}
 const spriteKey=f=>`${f.palette}:${f.seed}:${marksHash(f.marks)}`;
@@ -236,7 +272,6 @@ function bindCanvas(){
 }
 // Holding a finger (or the button) still: scatter food around the spot, or stir up a big ring in watching mode.
 function scatterFeed(x,y){
-  hostDebug(`scatter ${Math.round(x)},${Math.round(y)} feed=${feedMode} water=${simulation.isWater(x,y,4)}`);
   if(!scene)return;
   scene.glimmer(x,y,1.3);
   if(scene.touchSeasons(x,y)){if(sound.active)sound.tap();return;}
@@ -266,7 +301,6 @@ function stirWater(x,y){
 }
 // A right click: a wide fright, the fish scatter and drop into deeper water.
 function scareBurst(x,y){
-  hostDebug(`scare burst ${Math.round(x)},${Math.round(y)}`);
   if(!scene)return;
   scene.glimmer(x,y,1.6);
   scene.startle(x,y);
@@ -276,21 +310,34 @@ function scareBurst(x,y){
   sound.tap();
 }
 bindCanvas();
+function recoverRenderer(error){
+  console.warn('Pond renderer failed',error);
+  const old=renderer,wasGL=old?.kind==='webgl2';
+  renderer=null;old?.dispose?.();document.body.classList.remove('gl');
+  if(wasGL){document.body.classList.add('gl-pending');force2D=true;createPond();}
+}
 function createPond(){
-  // 底图可以是 8K，但岸线、荷叶、鱼食和锦鲤都标注在 POND_MAP 的 2560×1440 设计尺度上。
-  renderer=PondGL.createRenderer(canvas,bedImage,sprites,()=>{renderer=null;createPond();},backgroundMask(backgroundSeason,bedImage),{width:POND_MAP.width,height:POND_MAP.height});
-  if(!renderer){toast('当前浏览器无法绘制池塘');return;}
-  if(renderer.canvas!==canvas){canvas=renderer.canvas;bindCanvas();}
-  document.body.classList.toggle('gl',renderer.kind==='webgl2');
-  if(scene)scene.R=renderer;else scene=new PondScene.PondScene(renderer,simulation);
+  if(panelMode)return;
+  // 底图统一为 4K，但岸线、荷叶、鱼食和锦鲤都标注在 POND_MAP 的 2560×1440 设计尺度上。
+  const source=canvas;
+  const next=PondGL.createRenderer(source,bedImage,sprites,()=>{
+    if(renderer?.canvas===source)recoverRenderer('WebGL context lost');
+  },backgroundMask(backgroundSeason,bedImage),{width:POND_MAP.width,height:POND_MAP.height},force2D);
+  renderer=next;
+  if(!next){toast('当前浏览器无法绘制池塘');return;}
+  if(next.canvas!==canvas){canvas=next.canvas;bindCanvas();}
+  document.body.classList.toggle('gl-pending',next.kind==='webgl2');
+  if(scene)scene.R=next;else scene=new PondScene.PondScene(next,simulation);
+  scene.setNightWindow?.(...(moonWindow()||[]));
   scene.setSeason(backgroundSeason);
-  resize();scene.update(0,settings);scene.setLook(settings.weather,settings.night,undefined,settings,twilightNightK());
+  resize();if(renderer!==next)return;
+  scene.update(0,settings);scene.setLook(settings.weather,settings.night,undefined,settings,twilightNightK());
   simulation.fish.forEach(f=>f.spriteReady=false);uploadSprites();
   warmBackgrounds();
 }
 function drawLabels(){
   const chats=scene&&scene.chats&&scene.chats.length?scene.chats:null;
-  if(!settings.names&&!chats){if(labels.dataset.on){labelCtx.clearRect(0,0,labels.width,labels.height);labels.dataset.on='';}return;}
+  if(!syncLabelCanvas(!panelMode&&(settings.names||!!chats)))return;
   labels.dataset.on='1';labelCtx.setTransform(dpr,0,0,dpr,0,0);labelCtx.clearRect(0,0,width,height);
   if(settings.names){
     labelCtx.font='11px "PingFang SC","Microsoft YaHei",sans-serif';labelCtx.textAlign='center';labelCtx.textBaseline='alphabetic';labelCtx.lineJoin='round';labelCtx.lineWidth=3;labelCtx.strokeStyle='rgba(34,52,45,.55)';labelCtx.fillStyle='#fbf9ec';
@@ -324,52 +371,98 @@ function drawPreview(dt){
 }
 // One animation loop for the page. It is started separately from start(), which waits on the season's
 // artwork and weather: a panel can be open before that finishes, and its preview still needs to move.
-let frameStarted=false;
+let frameStarted=false,frameHandle=0,nextFrameAt=0,lastFrameInterval=0,appDisposed=false;
 let lastAutoSave=Date.now();
-function ensureFrame(){if(frameStarted)return;frameStarted=true;requestAnimationFrame(frame);}
-function frame(now){requestAnimationFrame(frame);if(panelMode){drawPreview(.05);return;}const frameInterval=1000/Math.min(hostFps,settings.quality==='eco'?30:60);if(now-lastFrame<frameInterval*.8)return;lastFrame=now;const dt=last?Math.min((now-last)/1000,.05):.016;last=now;drawPreview(dt);
-  if(paused||document.hidden||!renderer)return;time+=dt;
+function frameDue(now,interval){
+  if(interval!==lastFrameInterval){lastFrameInterval=interval;nextFrameAt=now;}
+  if(now+.05<nextFrameAt)return false;
+  nextFrameAt+=interval*Math.max(1,Math.floor((now-nextFrameAt)/interval)+1);
+  return true;
+}
+// Draw one frame right away, then let rAF carry on: a host can load the page while it is hidden
+// (Wallpaper Engine starting with Windows), where the first rAF may not arrive for a while.
+function ensureFrame(){if(frameStarted||appDisposed)return;frameStarted=true;last=0;nextFrameAt=0;frame(performance.now());}
+function frame(now){
+  frameHandle=0;if(appDisposed){frameStarted=false;return;}
+  if(panelMode&&(!previewCanvas||!previewFish||!dialog.open||document.hidden||paused)){frameStarted=false;last=0;return;}
+  if(!panelMode&&(paused||(document.hidden&&pondFrameReady))){frameStarted=false;last=0;return;}
+  frameHandle=requestAnimationFrame(frame);
+  const frameInterval=1000/(panelMode?30:targetFps());
+  if(!frameDue(now,frameInterval))return;
+  lastFrame=now;const elapsed=last?(now-last)/1000:.016,dt=Math.min(elapsed,.05);last=now;
+  if(panelMode){drawPreview(dt);return;}
+  drawPreview(dt);
+  if(paused||!renderer)return;
+  // Still draw the first frame while hidden: a wallpaper started at boot would otherwise keep showing
+  // the static CSS painting until the host reports the page visible again (which some hosts never do).
+  if(document.hidden&&pondFrameReady)return;time+=dt;
   // Judge smoothness against the frame rate this pond aims for, not a fixed number (a 30 fps host is not "slow").
-  if(time>4&&perf.level<2&&dpr>1){perf.t+=dt;perf.n++;if(perf.t>5){const fps=perf.n/perf.t;if(fps<targetFps()*.75){perf.level++;resize();if(!wallpaperMode)toast('已自动调低画面精度，让池塘保持流畅');}perf.log=fps;perf.t=perf.n=0;}}
+  if(time>4&&perf.level<2&&dpr>1){perf.t+=elapsed;perf.n++;if(perf.t>5){const fps=perf.n/perf.t;if(fps<targetFps()*.75){perf.level++;resize();if(!wallpaperMode)toast('已自动调低画面精度，让池塘保持流畅');}perf.log=fps;perf.t=perf.n=0;}}
   // A status line in the host's log now and then (Android logcat, WebView2 dev tools) for checking a device.
   if(time>=(perf.next??8)){perf.next=time+60;console.info(`[pond] ${Math.round(perf.log||0)} fps · ${dpr.toFixed(2)}x · ${renderer.canvas.width}×${renderer.canvas.height} · level ${perf.level}`);}
   const eaten=simulation.totalEaten;simulation.step(dt,settings.speed);if(eaten!==simulation.totalEaten)scheduleSave();
-  for(const e of simulation.events.splice(0))if(e.type==='eat'){scene.drop(e.x,e.y,5*scene.scale,.3);if(sound.active)sound.gulp();}
+  const simEvents=simulation.events;
+  for(let i=0;i<simEvents.length;i++){const e=simEvents[i];if(e.type==='eat'){scene.drop(e.x,e.y,5*scene.scale,.3);if(sound.active)sound.gulp();}}
+  simEvents.length=0;
   scene.setLook(settings.weather,settings.night,dt,settings,twilightNightK());scene.update(dt,settings);
-  for(const e of scene.events.splice(0))if(e.type==='thunder'){simulation.dive();sound.thunderAfter(e.delay,e.strength);}
-  scene.draw(settings);renderer.render(time,dt,scene.look);
+  const sceneEvents=scene.events;
+  for(let i=0;i<sceneEvents.length;i++){const e=sceneEvents[i];if(e.type==='thunder'){simulation.dive();sound.thunderAfter(e.delay,e.strength);}}
+  sceneEvents.length=0;
+  let rendered;
+  try{scene.draw(settings);rendered=renderer.render(time,dt,scene.look);}
+  catch(error){recoverRenderer(error);return;}
+  if(rendered!==false){
+    if(document.body.classList.contains('gl-pending')){document.body.classList.remove('gl-pending');document.body.classList.add('gl');}
+    if(!pondFrameReady){pondFrameReady=true;window.PondHost?.pondFrameReady?.();}
+  }
   drawLabels();
   // Once a minute the pond saves itself, so who has been swimming beside whom reaches the stored koi.
   if(Date.now()-lastAutoSave>60000){lastAutoSave=Date.now();scheduleSave();}
 }
 function loadBackground(season){
-  if(!backgroundCache.has(season))backgroundCache.set(season,new Promise((resolve,reject)=>{
-    const image=new Image();image.decoding='async';
-    const failed=()=>{backgroundCache.delete(season);reject(Error('background'));};
-    image.onload=async()=>{try{if(image.decode)await image.decode();resolve(image);}catch{failed();}};image.onerror=failed;
-    image.src=window.POND_IMAGES?.[season]||(season==='spring'?window.POND_IMAGE:null)||SEASONS[season].image;
-  }));
+  if(!backgroundCache.has(season)){
+    const path=SEASONS[season].image;
+    const embedded=window.POND_IMAGES?.[season]||(season==='spring'?window.POND_IMAGE:null);
+    const load=src=>new Promise((resolve,reject)=>{
+      const image=new Image();image.decoding='async';
+      image.onload=async()=>{try{if(image.decode)await image.decode();resolve(image);}catch(error){reject(error);}};
+      image.onerror=()=>reject(Error('background'));
+      image.src=src;
+    });
+    const request=(embedded?load(embedded).catch(()=>load(path)):load(path)).then(image=>{
+      image.onload=image.onerror=null;
+      if(backgroundCache.get(season)===request)backgroundSizes.set(season,(image.naturalWidth||image.width)*(image.naturalHeight||image.height)*4);
+      return image;
+    }).catch(error=>{
+      if(backgroundCache.get(season)===request){backgroundCache.delete(season);backgroundSizes.delete(season);}
+      throw error;
+    });
+    backgroundCache.set(season,request);
+  }
   return backgroundCache.get(season);
 }
 async function syncSeason(){
+  if(panelMode){backgroundSeason=settings.season;pendingSeason=null;$('#season-label').textContent=SEASONS[settings.season].title;return;}
   if(!lotusArtworkReady)return;
   const season=settings.season;
   if(pendingSeason===season||(backgroundSeason===season&&!pendingSeason))return;
   const request=++seasonRequest;pendingSeason=season;
   try{
     const image=await loadBackground(season);
-    if(request!==seasonRequest)return;
+    if(appDisposed||request!==seasonRequest){trimBackgroundCache();return;}
     bedImage=image;backgroundSeason=season;pendingSeason=null;
     $('.pond-bed').style.backgroundImage=`url("${SEASONS[season].image}")`;
     document.body.dataset.season=season;$('#season-label').textContent=SEASONS[season].title;
     if(renderer){
-      renderer.setBackground(image,backgroundMask(season,image));syncBackdrop();
-      scene.setSeason(season);scene.layout(width,height);syncShelters();
+      try{renderer.setBackground(image,backgroundMask(season,image),lightBackdrops);}
+      catch(error){recoverRenderer(error);}
+      if(renderer){syncBackdrop();scene.setSeason(season);scene.layout(width,height);syncShelters();}
     }else createPond();
+    trimBackgroundCache();
     if(activePanel==='weather')updateSeasonOptions();
   }catch{
     if(request!==seasonRequest)return;
-    pendingSeason=null;settings.season=backgroundSeason||'spring';
+    pendingSeason=null;trimBackgroundCache();settings.season=backgroundSeason||'spring';
     if(!renderer&&season!=='spring')await syncSeason();
     applyWeather(false);persist();if(activePanel==='weather')renderWeather();toast('景色加载失败，已保留原鱼池');
   }
@@ -389,6 +482,7 @@ function updateSeasonOptions(){
   $('#auto-weather').checked=settings.autoWeather;updateWeatherInfo();
 }
 async function start(){
+  if(panelMode)return;
   // Decode the original lotus cutouts once before the renderer uploads its sprite atlas.
   try{
     const image=new Image();image.decoding='async';
@@ -400,7 +494,11 @@ async function start(){
     await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=window.POND_DRIFT_IMAGE||'assets/drifting-flora.png';});
     if(image.decode)await image.decode();Object.assign(sprites,PondArt.driftingSprites(image,window.POND_DRIFTERS||{}));
   }catch{console.warn('Drifting flowers and leaves unavailable');}
-  lotusArtworkReady=true;await syncSeason();ensureFrame();
+  if(appDisposed)return;
+  lotusArtworkReady=true;await syncSeason();if(appDisposed)return;ensureFrame();
+  // Tell a desktop host the saved screen mode: its first build used the last one it remembered, which can
+  // differ after the settings are restored elsewhere. The host rebuilds once only when they differ.
+  if(desktopHost)persist();
 }
 start();
 function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;const pillFish=$('#pill-fish-text');if(pillFish)pillFish.textContent=`${simulation.fish.length} 尾`;}
@@ -537,12 +635,12 @@ function syncPillWeather(glyph,label,temperature){
   if(box){box.dataset.icon=glyph;box.innerHTML=icon(glyph);}
   if(text)text.textContent=temperature.endsWith('°C')?temperature.replace('°C','°'):label;
 }
-function applyWeather(syncBackground=true){updatePondHint();document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};const weatherGlyph=settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather,temperatureText=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-symbol').innerHTML=icon(weatherGlyph);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=temperatureText;syncPillWeather(weatherGlyph,labels[settings.weather],temperatureText);$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);if(syncBackground)syncSeason();syncShelters();}
+function applyWeather(syncBackground=true){updatePondHint();document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};const weatherGlyph=settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather,temperatureText=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-symbol').innerHTML=icon(weatherGlyph);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=temperatureText;syncPillWeather(weatherGlyph,labels[settings.weather],temperatureText);$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);if(syncBackground)syncSeason();syncShelters();if(scene)scene.setNightWindow?.(...(moonWindow()||[]));}
 // Rain sends the fish under the lotus leaves; any other weather lets them wander again.
 function syncShelters(){if(!scene)return;simulation.setShelters(settings.weather==='rain'?scene.shelterPoints():null);}
 function rainLabel(){return settings.rainAmount<.34?'小雨':settings.rainAmount<.67?'中雨':'大雨';}
 function snowLabel(){return settings.snowAmount<.34?'小雪':settings.snowAmount<.67?'中雪':'大雪';}
-function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();const pillTime=$('#pill-time');if(pillTime)pillTime.textContent=$('#clock').textContent;syncAutoNight();}clockTick();setInterval(clockTick,1000);applyWeather();
+function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();const pillTime=$('#pill-time');if(pillTime)pillTime.textContent=$('#clock').textContent;syncAutoNight();}clockTick();const clockTimer=setInterval(clockTick,1000);applyWeather();
 const dialog=$('#panel');
 // The Windows host opens the interactive window straight into a panel the wallpaper's card asked for.
 const requestedPanel=new URLSearchParams(location.search).get('panel');
@@ -551,7 +649,7 @@ if(['fish','weather','settings'].includes(requestedPanel))requestAnimationFrame(
 document.querySelectorAll('[data-panel]').forEach(b=>b.addEventListener('click',()=>openPanel(b.dataset.panel)));
 $('.close-panel').addEventListener('click',()=>{if(panelMode){try{window.chrome?.webview?.postMessage('panel-close');}catch{}return;}dialog.close();});
 dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
-dialog.addEventListener('close',()=>{activePanel='';previewCanvas=null;previewFish=null;compareWith=null;citySearchController?.abort();$('#panel-toast')?.classList.remove('visible');armCardIdle();});
+dialog.addEventListener('close',()=>{activePanel='';previewCanvas=null;previewFish=null;previewSprite=null;previewKey='';compareWith=null;citySearchController?.abort();$('#panel-toast')?.classList.remove('visible');armCardIdle();});
 function openPanel(type){activePanel=type;previewCanvas=null;previewFish=null;const names={fish:['我的锦鲤','MEET YOUR LITTLE FRIENDS'],weather:['池塘天气','EVERY WEATHER HAS ITS POETRY'],settings:['池塘设置','MAKE YOURSELF AT HOME']};$('#panel-title').textContent=names[type][0];$('#panel-eyebrow').textContent=names[type][1];if(!dialog.open){if(panelMode)dialog.show();else dialog.showModal();}({fish:renderFish,weather:renderWeather,settings:renderSettings})[type]();if(type==='fish')ensureFrame();}
 function thumbnail(f,width=120,height=60){const c=document.createElement('canvas');c.width=width*2;c.height=height*2;c.style.width=`${width}px`;c.style.height=`${height}px`;const context=c.getContext('2d');context.scale(2,2);const s=Math.min(f.size*.95,width*.86/96);PondScene.drawKoi2D(context,{...f,phase:1},fishCanvas(f),sprites,width*.5+12*s,height*.5-1.4*s,-.12,s,.35);return c;}
 function renderFish(){const content=$('#panel-content');content.innerHTML=`<p class="description">为你的池塘添一尾锦鲤。选一种花色，取一个好名字。</p><div class="fish-preview"><canvas id="preview" width="880" height="290" aria-label="锦鲤外观预览"></canvas><span class="preview-label">一鱼一色 · 各有欢喜</span><span class="preview-temper" id="preview-temper"></span></div><div class="form-row"><label>锦鲤花色</label><div class="palette">${PALETTES.map((p,i)=>`<button type="button" class="swatch ${i===0?'selected':''}" style="background:${p.spot}" data-palette="${i}" aria-label="${p.name}" aria-pressed="${i===0}"></button>`).join('')}</div><span id="palette-name" class="small-note">红白</span></div><div class="form-row"><label for="fish-size">锦鲤大小</label><input id="fish-size" type="range" min="${KOI_SIZE.min}" max="${KOI_SIZE.max}" step="0.05" value="${KOI_SIZE.initial}"/><button id="new-pattern" class="edit-fish">换个花纹 ↻</button></div><p class="small-note">默认展示为最大尺寸，可向左调小。</p><div class="form-row paint-tools"><label for="paint-toggle">手绘花纹</label><input id="paint-toggle" type="checkbox" aria-label="手绘花纹"/><span class="small-note">开启后在鱼身涂画</span><input id="paint-color" type="color" value="#bc5036" aria-label="画笔颜色"/><button id="clear-paint" type="button" class="edit-fish">清除</button></div><form id="add-fish-form"><div class="form-row"><label for="fish-name">给它起名</label><input id="fish-name" type="text" maxlength="12" placeholder="例如：小满、如意、听雨" autocomplete="off"/></div><div class="form-actions"><span class="small-note">它会记住你投下的每一粒鱼食</span><button class="primary" type="submit">放入池塘 ＋</button></div></form><div class="collection-head"><h3>我的小伙伴 <span id="collection-count" class="small-note"></span></h3><button class="edit-fish" id="restore-all" title="锦鲤回到刚来时的体型">全部还原体型</button></div><p class="temper-legend"><span><b>贪</b>贪吃 · 总第一个冲到食</span><span><b>怯</b>胆小 · 一点动静就躲开</span><span><b>独</b>独行 · 喜欢自己待着</span><span><b>亲</b>亲人 · 爱凑在鱼群里</span></p><div class="fish-grid" id="fish-grid"></div><div class="collection-foot"><span class="small-note" id="week-eaten"></span><button class="edit-fish" id="open-memorial">曾经的伙伴</button></div>`;
@@ -573,7 +671,7 @@ function renderFish(){const content=$('#panel-content');content.innerHTML=`<p cl
     persist();renderCollection();
     toast(`已还原 ${grown.length} 尾锦鲤的体型，吃食记录都还在`);
   });
-  $('#add-fish-form').addEventListener('submit',e=>{e.preventDefault();if(simulation.fish.length>=60)return toast('池塘最多容纳 60 尾锦鲤');const f={...createFish(simulation.fish.length),palette:previewFish.palette,size:clamp(previewFish.size,KOI_SIZE.min,KOI_SIZE.max),seed:previewFish.seed,marks:previewFish.marks.map(m=>({...m}))};f.name=$('#fish-name').value.trim().slice(0,12)||f.name;simulation.fish.push(f);simulation.confineFish(f);uploadSprites();$('#fish-name').value='';updateMeta();persist();renderCollection();toast(`${f.name} 已游入池塘`);});renderCollection();}
+  $('#add-fish-form').addEventListener('submit',e=>{e.preventDefault();if(simulation.fish.length>=60)return toast('池塘最多容纳 60 尾锦鲤');const f={...createFish(simulation.fish.length),palette:previewFish.palette,size:clamp(previewFish.size,KOI_SIZE.min,KOI_SIZE.max),seed:previewFish.seed,marks:previewFish.marks.map(m=>({...m}))};f.name=$('#fish-name').value.trim().slice(0,12)||f.name;simulation.fish.push(f);simulation.confineFish(f);uploadSprites();$('#fish-name').value='';updateMeta();persist();renderCollection();toast(`${f.name} 已游入池塘`);});renderCollection();ensureFrame();}
 // The preview shows the koi that is about to be added, so it also names the temperament she will get.
 function syncPreviewTemper(){
   const el=$('#preview-temper');
@@ -605,6 +703,7 @@ function weeklyEaten(){if(!daily||!daily.eaten)return 0;return Object.keys(daily
 function readMemorial(){try{const v=JSON.parse(localStorage.getItem('bichi-pond-memorial'));return Array.isArray(v)?v:[];}catch{return[];}}
 function addMemorial(entry){const list=readMemorial();list.unshift(entry);try{localStorage.setItem('bichi-pond-memorial',JSON.stringify(list.slice(0,50)));}catch{}}
 function renderFishDetail(f){
+  previewCanvas=null;previewFish=null;previewSprite=null;previewKey='';
   const born=f.born||null;
   const days=born?Math.max(1,Math.ceil((Date.now()-born)/864e5)):null;
   const grew=f.baseSize>0?Math.max(0,(f.size/f.baseSize-1)*100):0;
@@ -635,6 +734,7 @@ function restoreTarget(f){return f.baseSize;}
 function restoreBuild(f){f.size=restoreTarget(f);f.growthBase=f.eaten;}
 // Two koi side by side: colour, temperament, appetite, build, age.
 function renderCompare(a,b){
+  previewCanvas=null;previewFish=null;previewSprite=null;previewKey='';
   const grew=f=>{const g=f.baseSize>0?(f.size/f.baseSize-1)*100:0;return g>=1?'+'+g.toFixed(0)+'%':'刚来';};
   const ageOf=f=>{const g=koiAge(f);return g?g.days+' 天':null;};
   $('#panel-title').textContent='比一比';
@@ -646,6 +746,7 @@ function renderCompare(a,b){
 }
 // The koi that have been let go, kept as a short list of names.
 function renderMemorial(){
+  previewCanvas=null;previewFish=null;previewSprite=null;previewKey='';
   const list=readMemorial();
   $('#panel-title').textContent='曾经的伙伴';
   $('#panel-eyebrow').textContent='THOSE WHO SWAM ON';
@@ -664,7 +765,7 @@ simulation.fish.splice(i,1);simulation.fish.forEach((g,j)=>{if(j>=i)g.spriteRead
   toast(`「${f.name}」游向了更远的水面`);}
 // The four season thumbnails are the page's only <img> elements, and they are decoded synchronously.
 // With decoding="async" WebKit repaints a picture it has not decoded yet as an empty box and fills it
-// in later; a panel opened or re-rendered while the pond was preparing its 8K artwork sometimes kept
+// in later; a panel opened or re-rendered while the pond was preparing its artwork sometimes kept
 // four empty boxes. A 320×180 JPEG decodes in place in about a millisecond, so nothing is gained by waiting.
 function renderWeather(){$('#panel-content').innerHTML=`<p class="description">春看繁花，夏听蝉鸣，秋赏红叶，冬候落雪。</p><h3 class="season-heading">池塘四季</h3><div class="season-options" role="group" aria-label="池塘季节">${Object.entries(SEASONS).map(([v,s])=>`<button type="button" class="season-option ${settings.season===v?'selected':''}" data-season="${v}" aria-label="${s.name}季" aria-pressed="${settings.season===v}"><img src="${s.thumbnail}" alt="" decoding="sync"/><span>${s.name}</span><small>${s.title}</small></button>`).join('')}</div><p class="small-note season-note" id="season-note" role="status">${pendingSeason?'正在切换景色…':'切换季节会换上对应景色与天气，晴雨仍可单独调整。'}</p><h3>此刻天气</h3><div class="weather-options">${[['sunny','晴日','sun'],['cloudy','多云','cloudy'],['rain','下雨','rain'],['snow','落雪','snow']].map(([v,n,i])=>`<button class="weather-option ${settings.weather===v?'selected':''}" data-weather="${v}" aria-pressed="${settings.weather===v}">${icon(i)}<span>${n}</span></button>`).join('')}</div><div class="setting-row"><div>雨量<small id="rain-note">${rainLabel()} · 下雨时生效，跟随城市天气时自动调整</small></div><input id="rain-amount" type="range" aria-label="雨量" min="0" max="1" step="0.05" value="${settings.rainAmount}"/></div><div class="setting-row"><div>雪量<small id="snow-note">${snowLabel()} · 落雪时生效，岸边会渐渐积雪</small></div><input id="snow-amount" type="range" aria-label="雪量" min="0" max="1" step="0.05" value="${settings.snowAmount}"/></div><div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮；跟随城市天气时，按当地日落慢慢入夜</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night?'checked':''}/></div><div class="setting-row"><div>跟随城市天气<small>每 15 分钟同步当地季节、晴雨雪与日出日落</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather?'checked':''}/></div><h3>城市天气</h3><form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form><div id="city-results" class="city-results" aria-live="polite"></div><div class="weather-info" id="weather-info"></div><div class="weather-retry-row"><button type="button" class="edit-fish" id="weather-retry" hidden>重新获取天气</button></div><p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
   updateWeatherInfo();$('#panel-content').querySelectorAll('[data-season]').forEach(b=>b.addEventListener('click',()=>selectSeason(b.dataset.season)));$('#panel-content').querySelectorAll('[data-weather]').forEach(b=>b.addEventListener('click',()=>{settings.weather=b.dataset.weather;settings.autoWeather=false;weatherRequest++;persist();applyWeather();renderWeather();}));$('#night').addEventListener('change',e=>{settings.night=e.target.checked;applyWeather();persist();if(settings.autoWeather&&sunTimes)toast(e.target.checked?'已手动进入月下观鱼；下一次日出后会自动回到白天':'已手动回到白天；下一次日落时会自动入夜');});$('#rain-amount').addEventListener('input',e=>{settings.rainAmount=Number(e.target.value);$('#rain-note').firstChild.textContent=`${rainLabel()} · 下雨时生效，跟随城市天气时自动调整`;applyWeather();scheduleSave();});$('#snow-amount').addEventListener('input',e=>{settings.snowAmount=Number(e.target.value);$('#snow-note').firstChild.textContent=`${snowLabel()} · 落雪时生效，岸边会渐渐积雪`;applyWeather();scheduleSave();});$('#auto-weather').addEventListener('change',e=>{if(e.target.checked&&!settings.location){e.target.checked=false;toast('先查询并选择一个城市');$('#city-input').focus();return;}settings.autoWeather=e.target.checked;if(!settings.autoWeather)weatherRequest++;else{weatherFailures=0;weatherError=null;clearTimeout(weatherRetryTimer);weatherRetryTimer=0;}persist();applyWeather();if(settings.autoWeather)fetchWeather(true);updateWeatherInfo();});$('#city-form').addEventListener('submit',searchCity);
@@ -756,6 +857,16 @@ function sunStamps(daily,offsetSeconds){
   const offset=(Number(offsetSeconds)||0)*1000,toTime=value=>{const stamp=Date.parse(value+'Z');return Number.isFinite(stamp)?stamp-offset:null;};
   const rises=(daily?.sunrise||[]).map(toTime).filter(Number.isFinite),sets=(daily?.sunset||[]).map(toTime).filter(Number.isFinite);
   return rises.length&&sets.length?{rise:rises[0],set:sets[0],nextRise:rises[1]??null,label:{rise:(daily?.sunrise?.[0]||'').slice(11,16),set:(daily?.sunset?.[0]||'').slice(11,16)}}:null;
+}
+// The moon's reflection crosses the pond as the night runs. It follows the real sunset → sunrise only
+// while the clock is actually inside that night; manual 月下观鱼 (or daytime) uses the scene's slow drift.
+function moonWindow(){
+  if(!sunTimes)return null;
+  const now=Date.now(),set=sunTimes.set,rise=sunTimes.rise,next=sunTimes.nextRise;
+  if(!Number.isFinite(set)||!Number.isFinite(rise))return null;
+  if(now>=set)return Number.isFinite(next)&&next>set?[set,next]:null;
+  if(now<rise)return [set-864e5,rise];
+  return null;
 }
 function applyWeatherData(data,location,at=Date.now()){
   // Stored before the scene is touched: if a render step throws, the sky we just paid for is not lost,
@@ -887,12 +998,17 @@ function weatherWake(minGap=0){
   return true;
 }
 hydrateSky();
-setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
+const weatherTimer=setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
 addEventListener('online',()=>weatherWake(0));
 addEventListener('focus',()=>weatherWake(WEATHER_FRESH));
 addEventListener('pageshow',event=>{if(event.persisted)weatherWake(WEATHER_FRESH);});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)weatherWake(WEATHER_FRESH);});
-function renderSettings(){$('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['butterflies','蝴蝶与蜻蜓','春夏秋随季节出现，冬季隐藏；夏夜萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友'],['chat','好友对话','两尾常在一处的鱼靠近时，会小声聊上一句']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>声音</h3><div class="setting-row"><div>总音量<small>卡片顶部的声音图标可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>${[['water','waterVol','池水轻漾','轻柔池水作背景，音量可以单独调整'],['weatherSound','weatherVol','四季环境音','春听鸟鸣，夏听蝉鸣，秋听叶响，冬听轻风；雨雪随天气变化']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}`;const layoutRow=`<div class="setting-row"><div>显示布局<small>Windows 和 macOS 通用；双屏模式会让每块屏幕独立显示池塘</small></div><select id="display-mode" aria-label="显示布局"><option value="auto" ${settings.displayMode==='auto'?'selected':''}>自动适配</option><option value="dual" ${settings.displayMode==='dual'?'selected':''}>双屏独立</option><option value="portrait" ${settings.displayMode==='portrait'?'selected':''}>竖屏适配</option></select></div>`;$('#panel-content').insertAdjacentHTML('afterbegin',layoutRow);$('#display-mode').addEventListener('change',e=>{settings.displayMode=e.target.value;resize();persist();toast(e.target.value==='dual'?'已切换为双屏独立布局':e.target.value==='portrait'?'已切换为竖屏适配':'已切换为自动适配');});;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击右上角声音按钮即可试听');};document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});}
+function renderSettings(){$('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['butterflies','蝴蝶与蜻蜓','春夏秋随季节出现，冬季隐藏；夏夜萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友'],['chat','好友对话','两尾常在一处的鱼靠近时，会小声聊上一句']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>声音</h3><div class="setting-row"><div>总音量<small>卡片顶部的声音图标可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>${[['water','waterVol','池水轻漾','轻柔池水作背景，音量可以单独调整'],['weatherSound','weatherVol','四季环境音','春听鸟鸣，夏听蝉鸣，秋听叶响，冬听轻风；雨雪随天气变化']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}`;const layoutRow=`<div class="setting-row"><div>显示布局<small>底图方向：自动适配在竖屏窗口里旋转，双屏独立保持横向</small></div><select id="display-mode" aria-label="显示布局"><option value="auto" ${settings.displayMode==='auto'?'selected':''}>自动适配</option><option value="dual" ${settings.displayMode==='dual'?'selected':''}>双屏独立</option><option value="portrait" ${settings.displayMode==='portrait'?'selected':''}>竖屏适配</option></select></div>`;
+const screenRow=desktopHost?`<div class="setting-row"><div>屏幕显示<small>单屏只在主屏显示池塘；多屏每块屏幕各自一个池塘；共用把所有屏幕拼成一个池塘</small></div><select id="screen-mode" aria-label="屏幕显示"><option value="single" ${settings.screenMode==='single'?'selected':''}>单屏幕显示</option><option value="multi" ${settings.screenMode==='multi'?'selected':''}>多屏幕显示</option><option value="shared" ${settings.screenMode==='shared'?'selected':''}>多屏共用显示</option></select></div>`:'';
+$('#panel-content').insertAdjacentHTML('afterbegin',screenRow+layoutRow);
+$('#display-mode').addEventListener('change',e=>{settings.displayMode=e.target.value;resize();persist();toast(e.target.value==='dual'?'已切换为双屏独立布局':e.target.value==='portrait'?'已切换为竖屏适配':'已切换为自动适配');});
+$('#screen-mode')?.addEventListener('change',e=>{settings.screenMode=e.target.value;settings.screenModeSet=true;persist();toast(e.target.value==='single'?'只在主屏幕显示池塘':e.target.value==='shared'?'所有屏幕拼成一个池塘':'每块屏幕各自显示池塘');});
+;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击右上角声音按钮即可试听');};document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});}
 function setZen(value){zen=value;document.body.classList.toggle('zen',zen);document.querySelectorAll('.ui').forEach(el=>el.inert=zen);$('#exit-zen').hidden=!zen;$('#zen-button')?.setAttribute('aria-label',zen?'退出沉浸模式':'进入沉浸模式');armCardIdle();}
 $('#zen-button').addEventListener('click',()=>setZen(true));
 // Esc leaves the immersive view here too. On the desktop wallpaper the page has no keyboard focus, so the
@@ -913,8 +1029,13 @@ function updateSoundButton(on){
 let soundSyncing=false;
 // Follow the saved sound setting. The desktop wallpaper's pages carry no controls of their own (the corner card is
 // hidden in wallpaper mode and taps on the desktop become food), so this is the only way they can ever play sound.
-async function syncSound(){if(soundSyncing)return sound.active;soundSyncing=true;try{const on=await sound.setActive(settings.soundOn);updateSoundButton(on);return on;}catch{return false;}finally{soundSyncing=false;}}
-async function toggleSound(){try{settings.soundOn=!sound.active;const on=await sound.setActive(settings.soundOn);updateSoundButton(on);toast(on?'声音已开启，可在设置里分别调节池水和四季环境音':'声音已关闭');persist();}catch{toast('当前浏览器无法播放声音');}}
+function syncAudioVisibility(){if(sound.context&&sound.active){if(panelMode||paused||document.hidden)sound.context.suspend().catch(()=>{});else sound.context.resume().catch(()=>{});}}
+async function syncSound(){
+  if(panelMode){updateSoundButton(settings.soundOn);return false;}
+  if(soundSyncing)return sound.active;soundSyncing=true;
+  try{const on=await sound.setActive(settings.soundOn);syncAudioVisibility();updateSoundButton(on);return on;}catch{return false;}finally{soundSyncing=false;}
+}
+async function toggleSound(){try{settings.soundOn=!settings.soundOn;const on=panelMode?settings.soundOn:await sound.setActive(settings.soundOn);syncAudioVisibility();updateSoundButton(on);toast(on?'声音已开启，可在设置里分别调节池水和四季环境音':'声音已关闭');persist();}catch{toast('当前浏览器无法播放声音');}}
 $('#sound-button').addEventListener('click',toggleSound);
 // The panel window's size button asks the host to grow or shrink the window.
 $('#panel-expand')?.addEventListener('click',e=>{
@@ -926,21 +1047,29 @@ $('#panel-expand')?.addEventListener('click',e=>{
   try{window.chrome?.webview?.postMessage('panel-expand');}catch{}
 });
 if(settings.soundOn)syncSound();
-document.addEventListener('visibilitychange',()=>{last=0;if(sound.context&&sound.active){if(document.hidden)sound.context.suspend();else sound.context.resume();}if(document.hidden)persist();armCardIdle();});
-addEventListener('pagehide',persist);
-function setPausedState(value){paused=!!value;last=0;if(sound.context&&sound.active){if(paused)sound.context.suspend();else sound.context.resume();}}
+document.addEventListener('visibilitychange',()=>{last=0;nextFrameAt=0;syncAudioVisibility();if(document.hidden)persist();else if(renderer||panelMode&&previewCanvas)ensureFrame();armCardIdle();});
+addEventListener('pagehide',event=>{persist();if(!event.persisted)disposePage();});
+function disposePage(){
+  if(appDisposed)return;appDisposed=true;seasonRequest++;backgroundWarmGeneration++;
+  cancelAnimationFrame(frameHandle);cancelAnimationFrame(resizeHandle);frameStarted=false;
+  renderer?.dispose?.();renderer=null;scene=null;bedImage=null;
+  backgroundCache.clear();backgroundSizes.clear();for(const mask of backgroundMasks.values())mask.width=mask.height=1;backgroundMasks.clear();
+  spriteCache.clear();previewSprite=null;previewCanvas=null;previewFish=null;labels.width=labels.height=1;
+  clearInterval(clockTimer);clearInterval(weatherTimer);clearTimeout(weatherRetryTimer);clearTimeout(persistTimer);clearTimeout(cardIdleTimer);clearTimeout(tipTimer);clearTimeout(arriveTimer);clearTimeout(toastTimer);
+  citySearchController?.abort();sound.context?.close?.().catch(()=>{});
+}
+function setPausedState(value){paused=!!value;last=0;nextFrameAt=0;syncAudioVisibility();if(!paused&&(renderer||panelMode&&previewCanvas))ensureFrame();}
 // For a host app (the macOS menu-bar item, the Windows tray): switch weather, night or sound, pause the pond, read the current state.
 window.pondControl={
   set(o={}){if(has(SEASONS,o.season))selectSeason(o.season);if(['sunny','cloudy','rain','snow'].includes(o.weather)){settings.weather=o.weather;settings.autoWeather=false;weatherRequest++;}if(typeof o.night==='boolean')settings.night=o.night;if(typeof o.feedMode==='boolean')setFeedMode(o.feedMode);if(typeof o.soundOn==='boolean'){settings.soundOn=o.soundOn;syncSound();}if(typeof o.zen==='boolean')setZen(o.zen);if(typeof o.find==='string'&&scene)scene.highlight={id:o.find,until:scene.time+5};applyWeather();persist();if(activePanel==='weather')renderWeather();return this.state();},
   pause(value){setPausedState(value);return this.state();},
-  state(){return{season:settings.season,weather:settings.weather,night:settings.night,autoWeather:settings.autoWeather,feedMode,soundOn:sound.active,paused};}
+  state(){return{season:settings.season,weather:settings.weather,night:settings.night,autoWeather:settings.autoWeather,feedMode,soundOn:panelMode?settings.soundOn:sound.active,paused};}
 };
+window.__pondReady=true;
+window.dispatchEvent(new Event('pond-ready'));
 // The Windows host reports a tap in raw device px: once the wallpaper window lives inside the desktop,
 // its own DPI reading no longer matches what the page renders at, so the page converts with the real one.
-// TEMP DIAGNOSTIC (remove once the Windows corner card is confirmed): every tap on the desktop
-// wallpaper is logged by the host, so a dead button can be traced to the tap, the hit test or the request.
-function hostDebug(text){try{window.chrome?.webview?.postMessage('dbg:'+text);}catch{}}
-window.pondTapDevice=(x,y,controlsOnly)=>{const d=devicePixelRatio||1;hostDebug(`device ${x},${y} dpr=${d}${controlsOnly?' through an overlay':''}`);window.pondTap(x/d,y/d,controlsOnly);};
+window.pondTapDevice=(x,y,controlsOnly)=>{const d=devicePixelRatio||1;window.pondTap(x/d,y/d,controlsOnly);};
 window.pondHoldDevice=(x,y)=>{const d=devicePixelRatio||1;window.pondHold(x/d,y/d);};
 window.pondDoubleTapDevice=(x,y)=>{const d=devicePixelRatio||1;window.pondDoubleTap(x/d,y/d);};
 // The desktop wallpaper only passes a press and a release, so holding still and double-tapping are
@@ -967,12 +1096,10 @@ window.pondTap=(x,y,controlsOnly)=>{
   cardAwake();
   if(cornerMode){
     const hit=document.elementFromPoint(x,y),control=hit?.closest('button');
-    hostDebug(`css ${Math.round(x)},${Math.round(y)} hit=${hit?hit.tagName.toLowerCase()+(hit.dataset.panel?'['+hit.dataset.panel+']':''):'none'} btn=${control?(control.dataset.panel||control.id||'plain'):'none'}`);
     if(control){
       // The host opens the panel in its own small window, above the desktop icons. In a plain browser
       // there is no host, so the panel opens in the page instead.
       if(control.dataset.panel){
-        hostDebug('panel request '+control.dataset.panel);
         if(window.chrome?.webview){try{window.chrome.webview.postMessage('panel:'+control.dataset.panel);}catch{}}
         else openPanel(control.dataset.panel);
       }

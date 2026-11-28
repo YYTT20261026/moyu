@@ -67,7 +67,7 @@ def rounded_tile(size, radius_ratio=0.24, pad_ratio=0.075):
     koi = koi.rotate(-10, resample=Image.BICUBIC, center=(0.45 * tile, 0.48 * tile))
     canvas.alpha_composite(koi, (pad, pad + int(tile * 0.20)))
 
-    text = "摸鱼"
+    text = "MoYu"
     font_size = int(tile * 0.345)
     candidates = [
         "/System/Library/Fonts/Supplemental/Songti.ttc",

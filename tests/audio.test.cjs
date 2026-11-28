@@ -137,15 +137,17 @@ test('自然录音仅解码一次，加载后交叉淡入，后续换季继续�
   assert.equal(audio.layers.lapping.src, source); assert.equal(audio.context.decodes, 3);
 });
 
-test('自然录音内嵌为兼容的 PCM WAV，构建包含录音与署名，无需联网或 file 跨域加载', () => {
+test('自然录音内嵌为兼容的 PCM WAV，构建只随包署名、不再重复打包原始 wav', () => {
   const context = { window: {} }; vm.runInNewContext(fs.readFileSync(require.resolve('../assets/audio-data.js'), 'utf8'), context);
   const files = { lapping: 'pond-water', leaves: 'leaves-wind', bird: 'garden-bird' };
+  const distAudio = require('node:path').join(__dirname, '../dist/assets/audio');
   for (const [name, file] of Object.entries(files)) {
     const data = Buffer.from(context.window.POND_AUDIO[name], 'base64');
     assert.equal(data.toString('ascii', 0, 4), 'RIFF'); assert.equal(data.toString('ascii', 8, 12), 'WAVE');
     assert.equal(data.readUInt16LE(20), 1); assert.equal(data.readUInt16LE(34), 16); assert.equal(data.readUInt32LE(24), 22050);
     assert.deepEqual(data, fs.readFileSync(require.resolve(`../assets/audio/${file}.wav`)));
-    assert.deepEqual(data, fs.readFileSync(require.resolve(`../dist/assets/audio/${file}.wav`)));
+    // 录音只以 base64 形式随包一次；原始 wav 只是构建输入，不应再复制进 dist。
+    assert.equal(fs.existsSync(`${distAudio}/${file}.wav`), false);
   }
   assert.deepEqual(fs.readFileSync(require.resolve('../assets/audio/SOURCES.md')), fs.readFileSync(require.resolve('../dist/assets/audio/SOURCES.md')));
 });

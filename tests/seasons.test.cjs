@@ -15,9 +15,11 @@ function layout(season,w,h,turn=true){
 }
 const settings={weather:'sunny',night:false,turtles:false,butterflies:false,crabs:false,rainAmount:.5,snowAmount:.5};
 
-test('8K 底图只在 file:// 页面内嵌，http(s) 直接加载 PNG，静态构建包含缩略图',()=>{
-  // 底图单独放在 pond-bed.js：只有 file://（双击打开、Android、macOS、Wallpaper Engine）才需要这份
-  // base64，http(s) 页面（Windows 壁纸的虚拟域名、开发服务器、网站）直接读 assets 里的 PNG。
+test('4K 底图只在 file:// 页面内嵌为 JPEG q90，http(s) 直接加载无损 PNG',()=>{
+  // 底图单独放在 pond-bed.js：file://（双击打开、macOS、Wallpaper Engine）需要这份 4K base64，
+  // http(s) 页面（Windows 壁纸的虚拟域名、开发服务器、网站）直接读 assets 里的无损 PNG；
+  // 内嵌版本以 JPEG q90 再编码，避免每次离线分发都带上约 60 MB 的无损 base64。
+  // Android 用打包时生成的 2560×1440 版本，见 prepare-mobile.py。
   const bed={window:{}},context={window:{}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/pond-bed.js'),'utf8'),bed);
   vm.runInNewContext(fs.readFileSync(require.resolve('../assets/pond-data.js'),'utf8'),context);
@@ -26,22 +28,36 @@ test('8K 底图只在 file:// 页面内嵌，http(s) 直接加载 PNG，静态�
   assert.ok(fs.statSync(require.resolve('../assets/pond-data.js')).size<4e6,'pond-data.js 只保留荷花与花叶');
   const index=fs.readFileSync(require.resolve('../index.html'),'utf8');
   assert.ok(index.includes("location.protocol==='file:'")&&index.includes('assets/pond-bed.js'),'内嵌底图按协议按需加载');
+  const jpegSize=buf=>{
+    for(let i=2;i+8<buf.length;){
+      if(buf[i]!==0xFF){i++;continue;}
+      const marker=buf[i+1];
+      if(marker>=0xC0&&marker<=0xCF&&marker!==0xC4&&marker!==0xC8&&marker!==0xCC)
+        return [buf.readUInt16BE(i+7),buf.readUInt16BE(i+5)];
+      i+=2+buf.readUInt16BE(i+2);
+    }
+    throw new Error('no JPEG SOF');
+  };
   for(const [season,info] of Object.entries(core.SEASONS)){
+    assert.match(bed.window.POND_IMAGES[season],/^data:image\/jpeg;base64,/);
     const data=Buffer.from(bed.window.POND_IMAGES[season].split(',')[1],'base64');
-    assert.equal(data.subarray(1,4).toString(),'PNG');
-    // 岸线、石头、荷叶与鱼标注在 POND_MAPS 的 2560×1440 设计尺度上；底图可以是 8K，
+    assert.deepEqual([data[0],data[1],data[2]],[0xFF,0xD8,0xFF]);
+    // 岸线、石头、荷叶与鱼标注在 POND_MAPS 的 2560×1440 设计尺度上；内嵌底图仍是 4K，
     // 只要宽高比与设计尺度一致，渲染器就会把同一份标注映射到同一处水面。
-    const map=core.POND_MAPS[season],w=data.readUInt32BE(16),h=data.readUInt32BE(20);
-    assert.equal(w*map.height,h*map.width,`${season} 运行底图宽高比应与标注尺度一致`);
-    assert.ok(w>=map.width&&h>=map.height,`${season} 运行底图不应低于标注尺度`);
-    assert.deepEqual(data,fs.readFileSync(require.resolve(`../${info.image}`)));
-    assert.deepEqual(data,fs.readFileSync(require.resolve(`../dist/${info.image}`)));
+    const map=core.POND_MAPS[season],png=fs.readFileSync(require.resolve(`../${info.image}`));
+    const [w,h]=jpegSize(data);
+    assert.equal(w*map.height,h*map.width,`${season} 内嵌底图宽高比应与标注尺度一致`);
+    assert.deepEqual([w,h],[3840,2160],`${season} 内嵌底图保持 4K`);
+    assert.ok(data.length<png.length*.5,'JPEG 内嵌版本应显著小于无损 PNG');
+    // http(s) 使用的 PNG 仍是无损 4K，且与 dist 中的副本一致。
+    assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[3840,2160]);
+    assert.deepEqual(png,fs.readFileSync(require.resolve(`../dist/${info.image}`)));
     const thumbnail=fs.readFileSync(require.resolve(`../${info.thumbnail}`));
-    assert.ok(thumbnail.length<data.length*.05,'季节预览使用小图，避免再次解码完整底图');
+    assert.ok(thumbnail.length<png.length*.05,'季节预览使用小图，避免再次解码完整底图');
     assert.deepEqual(thumbnail,fs.readFileSync(require.resolve(`../dist/${info.thumbnail}`)));
   }
   assert.equal(bed.window.POND_IMAGE,bed.window.POND_IMAGES.spring);
-  assert.deepEqual(fs.readFileSync(require.resolve('../dist/assets/pond-bed.js')),fs.readFileSync(require.resolve('../assets/pond-bed.js')),'双击 dist/index.html 仍可离线加载 8K 底图');
+  assert.deepEqual(fs.readFileSync(require.resolve('../dist/assets/pond-bed.js')),fs.readFileSync(require.resolve('../assets/pond-bed.js')),'双击 dist/index.html 仍可离线加载同一批 4K 底图');
   const lotus=Buffer.from(context.window.POND_LOTUS_IMAGE.split(',')[1],'base64');
   assert.equal(lotus.subarray(1,4).toString(),'PNG');
   assert.deepEqual(lotus,fs.readFileSync(require.resolve('../assets/lotus-original.png')));
@@ -54,15 +70,51 @@ test('8K 底图只在 file:// 页面内嵌，http(s) 直接加载 PNG，静态�
   assert.deepEqual(fs.readFileSync(require.resolve('../assets/drifting-flora.json')),fs.readFileSync(require.resolve('../dist/assets/drifting-flora.json')));
 });
 
-test('Android 打包使用手机尺寸底图，不把 8K 底图与 169MB 内嵌脚本塞进 APK',()=>{
+test('资源目录只包含四张 4K 权威底图，不残留更高分辨率原图',()=>{
+  const path=require('node:path'),assets=path.join(__dirname,'../assets');
+  const beds=fs.readdirSync(assets).filter(name=>/^pond.*\.png$/.test(name)).sort();
+  assert.deepEqual(beds,Object.values(core.SEASONS).map(info=>path.basename(info.image)).sort());
+  for(const name of beds){
+    const png=fs.readFileSync(path.join(assets,name));
+    assert.equal(png.subarray(1,4).toString(),'PNG');
+    assert.deepEqual([png.readUInt32BE(16),png.readUInt32BE(20)],[3840,2160]);
+  }
+});
+
+test('Android 打包使用 2560×1440 手机底图：静图无损、内嵌 JPEG q90',()=>{
   const script=fs.readFileSync(require.resolve('../scripts/build-android.sh'),'utf8');
-  assert.ok(script.includes('scripts/prepare-mobile.py'),'APK 应先按手机尺寸生成底图');
-  assert.ok(script.includes('build/mobile/pond-bed.js'),'内嵌底图来自手机版本');
-  assert.ok(script.includes('build/mobile/stills/pond*.png'),'静态兜底画面与 CSS 背景用手机尺寸 PNG');
-  assert.ok(!script.includes('$ROOT/assets/pond-bed.js'),'不能打包 169MB 的 8K 内嵌脚本');
-  assert.ok(!/assets\/pond\*runtime\.png/.test(script),'不能把 8K PNG 打进 APK');
+  assert.ok(script.includes('scripts/embed.mjs'),'APK 应先刷新共享的 4K 运行图');
+  assert.ok(script.indexOf('scripts/embed.mjs')<script.indexOf('scripts/prepare-mobile.py'),'先生成共享底图，再同步 Android 数据');
+  assert.ok(script.includes('scripts/prepare-mobile.py'),'APK 应同步 Android 手机底图');
+  assert.ok(script.includes('build/mobile/pond-bed.js'),'内嵌底图来自 Android 同步版本');
+  assert.ok(script.includes('build/mobile/stills/pond*.png'),'静态兜底画面与 CSS 背景来自 Android 同步版本');
   const mobile=fs.readFileSync(require.resolve('../scripts/prepare-mobile.py'),'utf8');
-  assert.ok(/SIZE\s*=\s*\(2560,\s*1440\)/.test(mobile),'手机底图保持 2560×1440 标注尺度');
+  assert.ok(/SIZE\s*=\s*\(2560,\s*1440\)/.test(mobile),'Android 底图缩到 2560×1440');
+  assert.ok(mobile.includes('image.resize(SIZE'),'4K 原图需要被缩到手机尺寸');
+  assert.ok(mobile.includes('format="PNG"'),'静态兜底保持无损 PNG');
+  assert.ok(/QUALITY\s*=\s*90/.test(mobile)&&mobile.includes('format="JPEG"'),'file:// 内嵌用 JPEG q90 控制体积');
+  assert.ok(!mobile.includes('shutil.copyfile'),'不再逐字节复制 4K 底图');
+});
+
+test('所有平台构建只验证现有 4K 权威底图，不依赖旧原图或改写底图',()=>{
+  const prepare=fs.readFileSync(require.resolve('../scripts/prepare-bed.py'),'utf8');
+  assert.ok(/BED\s*=\s*\(3840,\s*2160\)/.test(prepare));
+  assert.ok(prepare.includes('image.format != "PNG" or image.size != BED'),'底图尺寸或格式不正确应拒绝构建');
+  assert.ok(prepare.includes('image.verify()'),'构建应检查 PNG 完整性');
+  assert.ok(prepare.includes('ASSETS / thumbnail, format="JPEG"'),'只保存小缩略图');
+  assert.ok(!/save\(\s*ASSETS \/ runtime|copyfile|resize\(BED|ImageEnhance|ImageFilter|inpaint|grove/.test(prepare),'不得重编码、缩放或改写权威底图');
+  for(const name of ['pond.png','pond-summer.png','pond-autumn.png','pond-winter.png']){
+    assert.ok(!prepare.includes(`"${name}"`),'构建不得依赖旧原图');
+    assert.ok(!fs.existsSync(require('node:path').join(__dirname,'../assets',name)),`${name} 已从工作树移除`);
+  }
+  const embed=fs.readFileSync(require.resolve('../scripts/embed.mjs'),'utf8');
+  assert.ok(embed.includes('prepare-bed.py')&&embed.includes('prepare-embed.py'));
+  assert.ok(embed.indexOf('prepare-bed.py')<embed.indexOf('prepare-embed.py'),'先验证 4K 底图，再生成 JPEG 内嵌数据');
+  assert.ok(fs.readFileSync(require.resolve('../scripts/build.mjs'),'utf8').includes("import('./embed.mjs')"));
+  for(const platform of ['windows','macos','android']){
+    const script=fs.readFileSync(require.resolve(`../scripts/build-${platform}.sh`),'utf8');
+    assert.ok(script.includes('scripts/embed.mjs'),`${platform} 构建刷新共享的 4K 底图`);
+  }
 });
 
 for(const [w,h,turn] of [[1280,720,true],[390,844,true],[390,844,false]])test(`${w}×${h} ${turn?'WebGL':'Canvas'}：四季散落花叶持续漂移旋转，受到水波推动也不越过岸边和石头`,()=>{
@@ -233,7 +285,7 @@ test('投食水波传播到荷叶后产生弹性起伏、逐渐回稳，换季�
 
 test('季节缩略图同步解码，面板打开或重绘时不留空框',()=>{
   // 页面里仅有的 <img> 就是这四张预览图。异步解码会先把尚未解码的图画成空框、稍后再补画；
-  // 面板在池塘准备 8K 底图时打开或重渲染，补画偶尔丢失，四个季节按钮就一直是空白。
+  // 面板在池塘准备底图时打开或重渲染，补画偶尔丢失，四个季节按钮就一直是空白。
   const app=fs.readFileSync(require.resolve('../app.js'),'utf8').replace(/^\s*\/\/.*$/gm,'');
   const tags=app.match(/<img\s[^>]*>/g)||[];
   assert.ok(tags.length>0,'四季预览仍是 <img>');

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- 碧池观鱼 for Windows: .NET Framework 4.8 (part of every Windows 10 and 11) + WebView2 (Edge's engine, also
+  <!-- MoYu for Windows: .NET Framework 4.8 (part of every Windows 10 and 11) + WebView2 (Edge's engine, also
        preinstalled), so the download is small and nothing else needs installing. Builds on macOS/Linux too. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -15,10 +15,10 @@
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <Version>1.2.7</Version>
-    <Product>摸鱼</Product>
-    <AssemblyTitle>摸鱼 · 锦鲤池塘动态壁纸</AssemblyTitle>
-    <Copyright>摸鱼 · 独立复刻作品</Copyright>
+    <Version>1.2.8</Version>
+    <Product>MoYu</Product>
+    <AssemblyTitle>MoYu · 锦鲤池塘动态壁纸</AssemblyTitle>
+    <Copyright>MoYu · 独立复刻作品</Copyright>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -31,7 +31,7 @@
   <!-- The pond itself: the same web files as every other build, served to WebView2 from a web\ folder. -->
   <ItemGroup>
     <Content Include="..\..\index.html;..\..\style.css;..\..\core.js;..\..\art.js;..\..\gl.js;..\..\scene.js;..\..\audio.js;..\..\app.js" Link="web\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\pond*runtime.png;..\..\assets\pond-data.js;..\..\assets\audio-data.js;..\..\assets\lotus-original.png;..\..\assets\favicon.svg" Link="web\assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\audio\*.*" Link="web\assets\audio\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\pond*runtime.png;..\..\assets\pond-*-thumb.jpg;..\..\assets\pond-data.js;..\..\assets\audio-data.js;..\..\assets\lotus-original.png;..\..\assets\favicon.svg" Link="web\assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\audio\SOURCES.md" Link="web\assets\audio\SOURCES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

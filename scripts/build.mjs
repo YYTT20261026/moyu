@@ -9,5 +9,8 @@ await mkdir(`${root}dist/assets`,{recursive:true});
 for(const file of files)await cp(`${root}${file}`,`${root}dist/${file}`);
 await cp(`${root}assets/audio-data.js`,`${root}dist/assets/audio-data.js`);
 for(const file of ['drifting-flora.png','drifting-flora.json'])await cp(`${root}assets/${file}`,`${root}dist/assets/${file}`);
-await cp(`${root}assets/audio`,`${root}dist/assets/audio`,{recursive:true});
+// The recordings are already embedded in audio-data.js; only the attribution ships alongside them.
+await rm(`${root}dist/assets/audio`,{recursive:true,force:true});
+await mkdir(`${root}dist/assets/audio`,{recursive:true});
+await cp(`${root}assets/audio/SOURCES.md`,`${root}dist/assets/audio/SOURCES.md`);
 console.log('静态项目已构建至 dist/；可直接打开 index.html 或导入 Wallpaper Engine。');

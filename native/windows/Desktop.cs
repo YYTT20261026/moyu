@@ -1,4 +1,4 @@
-// 碧池观鱼 · putting a window into the desktop, behind the icons.
+// MoYu · putting a window into the desktop, behind the icons.
 // Explorer's desktop is Progman (the static wallpaper) with SHELLDLL_DefView (the icons) on top. Sending Progman the
 // undocumented 0x052C message makes it split off a WorkerW layer between the two, the layer animated wallpapers use:
 //   • up to Windows 11 23H2 the WorkerW is a top-level window just after the one holding SHELLDLL_DefView;

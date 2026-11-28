@@ -12,6 +12,8 @@
   const fishPalette = f => PALETTES[f.palette] || PALETTES[0];
   // Fish body in local units: nose at +34, tail tip at -58; sprites span x -60..36, y -14..14.
   const BODY = { nose: 34, tail: -58, length: 92, segments: 16, rigid: 5, left: -60, width: 96, half: 14 };
+  // Bank-slide trials, shared by every koi instead of rebuilt per frame.
+  const SLIDE_FRACTIONS = [1, .5, .25];
   const TAU = Math.PI * 2;
   function randomSeed(seed) { let s = seed >>> 0; return () => { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }; }
   function weatherFromCode(code) { if ([71,73,75,77,85,86].includes(code)) return 'snow'; if (code >= 51) return 'rain'; if (code >= 2) return 'cloudy'; return 'sunny'; }
@@ -27,7 +29,7 @@
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   // Shorelines are traced against the 2048×1152 artwork guide, then stored as UVs.
   // Keep the guide size explicit: the runtime design space is 2560×1440, while the
-  // supplied 8K seasonal paintings are 7680×4320. Mixing those spaces is the easiest
+  // authoritative 4K seasonal paintings are 3840×2160. Mixing those spaces is the easiest
   // way to make an apparently small boundary edit drift after a resize or rotation.
   const MAP_GUIDE = Object.freeze({ width: 2048, height: 1152 });
   const DESIGN_SPACE = Object.freeze({ width: 2560, height: 1440 });
@@ -136,7 +138,7 @@
     autumn:{name:'秋',title:'枫染清池',image:'assets/pond-autumn-runtime.png',thumbnail:'assets/pond-autumn-thumb.jpg',weather:'sunny'},
     winter:{name:'冬',title:'白雪映池',image:'assets/pond-winter-runtime.png',thumbnail:'assets/pond-winter-thumb.jpg',weather:'snow'}
   };
-  function polygonSample(points,x,y) {
+  function polygonSample(points,x,y,out) {
     let inside=false,best=Infinity,qx=0,qy=0,ex=0,ey=0;
     for(let i=0,j=points.length-1;i<points.length;j=i++) {
       const [ax,ay]=points[j],[bx,by]=points[i],dx=bx-ax,dy=by-ay;
@@ -146,7 +148,7 @@
       if(d<best){best=d;qx=px;qy=py;ex=dx;ey=dy;}
     }
     const d=Math.sqrt(best),sign=inside?1:-1;
-    if(d>1e-7)return {distance:d*sign,nx:(x-qx)/d*sign,ny:(y-qy)/d*sign};
+    if(d>1e-7){out.distance=d*sign;out.nx=(x-qx)/d*sign;out.ny=(y-qy)/d*sign;return out;}
     // At the boundary itself, derive the inward normal using a nearby point.
     const len=Math.hypot(ex,ey)||1,nx=-ey/len,ny=ex/len;
     let side=false;
@@ -155,22 +157,25 @@
       const [ax,ay]=points[j],[bx,by]=points[i];
       if((ay>py)!==(by>py)&&px<(bx-ax)*(py-ay)/(by-ay)+ax)side=!side;
     }
-    return {distance:0,nx:nx*(side?1:-1),ny:ny*(side?1:-1)};
+    out.distance=0;out.nx=nx*(side?1:-1);out.ny=ny*(side?1:-1);return out;
   }
   class PondHabitat {
     constructor(width,height,imageToScreen,map=POND_MAP) {
       this.width=width;this.height=height;
       const transform=points=>points.map(([u,v])=>imageToScreen(u*map.width,v*map.height));
       this.water=transform(map.water);this.rocks=map.rocks.map(transform);
+      this.rockSample={};this.containsSample={};this.projectSample={};
     }
-    sample(x,y) {
-      let best=polygonSample(this.water,x,y);
-      for(const rock of this.rocks){const p=polygonSample(rock,x,y);p.distance=-p.distance;p.nx=-p.nx;p.ny=-p.ny;if(p.distance<best.distance)best=p;}
-      for(const p of [{distance:x,nx:1,ny:0},{distance:this.width-x,nx:-1,ny:0},
-        {distance:y,nx:0,ny:1},{distance:this.height-y,nx:0,ny:-1}])if(p.distance<best.distance)best=p;
-      return best;
+    sample(x,y,out={}) {
+      polygonSample(this.water,x,y,out);
+      for(const rock of this.rocks){const p=polygonSample(rock,x,y,this.rockSample);p.distance=-p.distance;p.nx=-p.nx;p.ny=-p.ny;if(p.distance<out.distance){out.distance=p.distance;out.nx=p.nx;out.ny=p.ny;}}
+      if(x<out.distance){out.distance=x;out.nx=1;out.ny=0;}
+      if(this.width-x<out.distance){out.distance=this.width-x;out.nx=-1;out.ny=0;}
+      if(y<out.distance){out.distance=y;out.nx=0;out.ny=1;}
+      if(this.height-y<out.distance){out.distance=this.height-y;out.nx=0;out.ny=-1;}
+      return out;
     }
-    contains(x,y,margin=0) { return Number.isFinite(x)&&Number.isFinite(y)&&this.sample(x,y).distance>=margin-1e-6; }
+    contains(x,y,margin=0) { return Number.isFinite(x)&&Number.isFinite(y)&&this.sample(x,y,this.containsSample).distance>=margin-1e-6; }
     feedingTarget(x,y,margin) {
       const target=this.project(x,y,margin);
       if(!target)return null;
@@ -180,11 +185,11 @@
       if(clear)return target;
       // In a narrow channel the nearest open water can lie across a stone.
       // Find a straight route through water so pellets can actually drift there.
-      let best=null,waypoint=null,room=this.sample(x,y).distance+1,reach=Math.hypot(this.width,this.height);
+      let best=null,waypoint=null,room=this.sample(x,y,this.projectSample).distance+1,reach=Math.hypot(this.width,this.height);
       for(let i=0;i<64;i++){
         const a=i*TAU/64,dx=Math.cos(a),dy=Math.sin(a);
         for(let r=4;r<reach;r+=4){
-          const px=x+dx*r,py=y+dy*r,p=this.sample(px,py);
+          const px=x+dx*r,py=y+dy*r,p=this.sample(px,py,this.projectSample);
           if(p.distance<4)break;
           if(p.distance>room){room=p.distance;waypoint=[px,py];}
           if(p.distance>=margin){best=[px,py];reach=r;break;}
@@ -195,7 +200,7 @@
     project(x,y,margin=0) {
       const ox=x,oy=y;
       for(let i=0;i<40;i++){
-        const p=this.sample(x,y);if(p.distance>=margin)return [x,y];
+        const p=this.sample(x,y,this.projectSample);if(p.distance>=margin)return [x,y];
         const push=margin-p.distance+.5;x+=p.nx*push;y+=p.ny*push;
       }
       // Concave corners can have competing normals. Choose the nearest safe
@@ -292,8 +297,24 @@
   class PondSimulation {
     constructor(fish,width,height,random=Math.random) { this.fish=fish; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; this.habitat=null;
       // Who swims beside whom: a running tally of nearby pairs, used by the collection's profiles.
-      this.bonds=new Map(); this.tick=0; }
+      this.bonds=new Map(); this.tick=0;
+      this.foodDistances=new WeakMap();this.foodSample={};this.poseScratch=new Float32Array((BODY.segments+1)*4);
+      // Reused edge samples for steering, so a swimming koi does not allocate two objects a frame.
+      this.edgeSample={};this.edgeSampleB={}; }
     isWater(x,y,margin=0) { return this.habitat?this.habitat.contains(x,y,margin):x>=margin&&x<=this.width-margin&&y>=margin&&y<=this.height-margin; }
+    foodIsWater(p,margin) {
+      const habitat=this.habitat;
+      if(!habitat)return this.isWater(p.x,p.y,margin);
+      if(!Number.isFinite(p.x)||!Number.isFinite(p.y))return false;
+      let cached=this.foodDistances.get(p);
+      if(!cached){cached={};this.foodDistances.set(p,cached);}
+      // 食物在所有鱼的子步中保持不动；只复用当前坐标下的精确多边形距离。
+      if(cached.x!==p.x||cached.y!==p.y||cached.habitat!==habitat||cached.width!==this.width||cached.height!==this.height||cached.habitatWidth!==habitat.width||cached.habitatHeight!==habitat.height){
+        cached.distance=habitat.sample(p.x,p.y,this.foodSample).distance;
+        cached.x=p.x;cached.y=p.y;cached.habitat=habitat;cached.width=this.width;cached.height=this.height;cached.habitatWidth=habitat.width;cached.habitatHeight=habitat.height;
+      }
+      return cached.distance>=margin-1e-6;
+    }
     fishMargin(f) { return (Math.abs(BODY.tail)+BODY.half+7)*f.size*this.scale+5; }
     feedingMargin() {
       // Leave room for at least one koi to line up its mouth and turn around a pellet.
@@ -322,7 +343,7 @@
         }else{
           // Nothing to eat here, so it is just a rock or a bank in the way: turn her back into open water,
           // otherwise she keeps nosing the same edge frame after frame — the spot that looked stuck.
-          const s=this.habitat.sample(f.x*this.width,f.y*this.height);
+          const s=this.habitat.sample(f.x*this.width,f.y*this.height,this.edgeSample);
           if(s&&Number.isFinite(s.nx)){
             f.goal={x:(f.x*this.width+s.nx*L*3)/this.width,y:(f.y*this.height+s.ny*L*3)/this.height};
             f.goalTime=2+this.random()*2;
@@ -426,7 +447,11 @@
     }
     // Counts pairs that are swimming close together at a similar depth; cheap enough at 24 fish.
     trackBonds() {
-      const fish=this.fish,w=this.width,h=this.height;
+      const fish=this.fish,w=this.width,h=this.height,ids=new Set(fish.map(f=>f.id));
+      for(const key of this.bonds.keys()){
+        const cut=key.indexOf('|');
+        if(!ids.has(key.slice(0,cut))||!ids.has(key.slice(cut+1)))this.bonds.delete(key);
+      }
       for(let i=0;i<fish.length;i++){
         const a=fish[i];
         for(let j=i+1;j<fish.length;j++){
@@ -460,7 +485,7 @@
       // A pellet lying closer to the bank than her mouth can reach is not food yet: it is still drifting
       // out to open water. Lunging at it only pinned her against the shore frame after frame.
       const mouthRoom=this.fishMargin(f)-BODY.nose*s-Math.max(6,7*s);
-      for(const p of this.food){if(p.eaten||(this.habitat&&!this.isWater(p.x,p.y,mouthRoom)))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
+      for(const p of this.food){if(p.eaten||(this.habitat&&!this.foodIsWater(p,mouthRoom)))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       // Anything unreachable by the bank is dropped for a moment after she bumps into it.
       f.foodCooldown=Math.max(0,(f.foodCooldown||0)-dt);
       if(f.foodCooldown>0)food=null;
@@ -508,10 +533,16 @@
       const mX=Math.min(w*.1+L*.3,w*.3),mY=Math.min(h*.1+L*.3,h*.3),lx=x+cos*L*1.2,ly=y+sin*L*1.2;let bx=0,by=0;
       if(lx<mX)bx=(mX-lx)/mX;else if(lx>w-mX)bx=(w-mX-lx)/mX;
       if(ly<mY)by=(mY-ly)/mY;else if(ly>h-mY)by=(h-mY-ly)/mY;
-      for(const ob of this.obstacles)for(const [px,py,R] of [[lx,ly,ob.r+L*.4],[x,y,ob.r+L*.2]]){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1;if(d<R){const k=(1-d/R)*2.5;bx+=dx/d*k;by+=dy/d*k;}}
+      for(const ob of this.obstacles){
+        // Two probe points (ahead and here); plain assignments keep the steering loop allocation-free.
+        const r1=ob.r+L*.4,dx1=lx-ob.x,dy1=ly-ob.y,d1=Math.hypot(dx1,dy1)||1;
+        if(d1<r1){const k=(1-d1/r1)*2.5;bx+=dx1/d1*k;by+=dy1/d1*k;}
+        const r2=ob.r+L*.2,dx2=x-ob.x,dy2=y-ob.y,d2=Math.hypot(dx2,dy2)||1;
+        if(d2<r2){const k=(1-d2/r2)*2.5;bx+=dx2/d2*k;by+=dy2/d2*k;}
+      }
       let bank=null,bankUrgency=0,bankAngle=0;
       if(this.habitat){
-        const edge=this.habitat.sample(x,y),ahead=this.habitat.sample(x+cos*Math.max(L,f.v*.5),y+sin*Math.max(L,f.v*.5)),margin=this.fishMargin(f);
+        const edge=this.habitat.sample(x,y,this.edgeSample),ahead=this.habitat.sample(x+cos*Math.max(L,f.v*.5),y+sin*Math.max(L,f.v*.5),this.edgeSampleB),margin=this.fishMargin(f);
         const near=clamp((margin+L*.8-edge.distance)/(L*.8),0,1),risk=clamp((margin+L*.4-ahead.distance)/L,0,2);
         const approaching=food&&f.flee<=0,avoid=approaching?.18:1;
         bx+=(edge.nx*near*2+ahead.nx*risk*2)*avoid;by+=(edge.ny*near*2+ahead.ny*risk*2)*avoid;
@@ -559,13 +590,13 @@
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*4);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
       if(this.habitat&&!this.isWater(x,y,this.fishMargin(f))){
-        const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY),margin=this.fishMargin(f);
+        const oldX=f.x*w,oldY=f.y*h,edge=this.habitat.sample(oldX,oldY,this.edgeSample),margin=this.fishMargin(f);
         const dx=x-oldX,dy=y-oldY,into=Math.min(0,dx*edge.nx+dy*edge.ny);
         // Remove only the into-bank part, keeping the useful along-bank motion. Local
         // projection may follow a curved edge, but must never teleport through a rock.
         const slideX=oldX+dx-edge.nx*into,slideY=oldY+dy-edge.ny*into;
         x=oldX;y=oldY;
-        for(const fraction of [1,.5,.25]){
+        for(const fraction of SLIDE_FRACTIONS){
           const px=oldX+(slideX-oldX)*fraction,py=oldY+(slideY-oldY)*fraction;
           const safe=this.isWater(px,py,margin)?[px,py]:this.habitat.project(px,py,margin+.05);
           if(safe&&Math.hypot(safe[0]-oldX,safe[1]-oldY)<=Math.hypot(dx,dy)*1.25+.1){
@@ -586,7 +617,7 @@
       // A very tight turn can swing the following tail out farther than the head.
       // Keep the full posed strip (including fins and tail beat) in the water.
       if(this.habitat){
-        const pose=fishPose(f,s),padding=BODY.half*s+5;
+        const pose=fishPose(f,s,this.poseScratch),padding=BODY.half*s+5;
         for(let i=0;i<pose.length;i+=4)if(!this.isWater(pose[i],pose[i+1],padding)){
           f.spine=null;updateSpine(f,s,w,h);break;
         }

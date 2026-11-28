@@ -1,13 +1,13 @@
-<p align="center"><img src="docs/screenshots/icon.png" width="128" alt="摸鱼图标"></p>
+<p align="center"><img src="docs/screenshots/icon.png" width="128" alt="MoYu 图标"></p>
 
-<h1 align="center">摸鱼</h1>
+<h1 align="center">MoYu</h1>
 
 <p align="center">把池塘放到桌面下面：锦鲤悠游、四季花开、雨打荷叶，轻轻一点就来抢食。<br>
 macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engine 里运行。</p>
 
 <p align="center"><a href="https://github.com/YYTT20261026/moyu/releases/latest"><b>⬇ 下载最新版本</b></a></p>
 
-![摸鱼秋季池塘](docs/screenshots/macos-current.jpg)
+![MoYu 秋季池塘](docs/screenshots/macos-current.jpg)
 
 | 多云：云影移过，遮住处变暗、移走后阳光和焦散回来 | 雨天：荷叶积水、水珠、雨雾与涟漪 |
 | --- | --- |
@@ -21,9 +21,9 @@ macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engin
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| macOS 12+（Apple 芯片） | `摸鱼-<版本>.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
-| Windows 10 / 11 | `摸鱼-<版本>.exe` | 双击即安装到当前用户目录（`%LOCALAPPDATA%\Programs\摸鱼`），无需管理员权限；自动创建桌面与开始菜单快捷方式，并提供卸载入口 |
-| Android 7.0+ | `摸鱼.apk` | 安装后第一次打开即进入动态壁纸预览，点「设置壁纸」 |
+| macOS 12+（Apple 芯片） | `MoYu-<版本>-macOS.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
+| Windows 10 / 11 | `MoYu-<版本>.exe` | 双击即安装到当前用户目录（`%LOCALAPPDATA%\Programs\MoYu`），无需管理员权限；自动创建桌面与开始菜单快捷方式，并提供卸载入口。便携版为 `MoYu-<版本>-Windows.zip`，解压后双击 `BichiPond.exe` |
+| Android 7.0+ | `MoYu-<版本>-Android.apk` | 安装后第一次打开即进入动态壁纸预览，点「设置壁纸」 |
 | 浏览器 / Wallpaper Engine | `MoYu-<版本>-Web.zip` | 解压后打开 `index.html`，或在 Wallpaper Engine 中导入该文件夹 |
 
 iPhone：iOS 不允许第三方应用提供动态壁纸，因此没有 iPhone 版本；可以在 Safari 中打开网页版全屏观赏。
@@ -113,9 +113,9 @@ npm run build
 | `scene.js` | 乌龟、蝴蝶、蜻蜓、萤火虫、花瓣、雨雪与天气光照，锦鲤的鳍和阴影；底图中浮于水面之物的标注与遮罩 |
 | `audio.js` | 自然录音、四季环境音与互动水声的混音与调度 |
 | `app.js` | 界面、面板、天气服务、主循环 |
-| `assets/pond-runtime.png` | 池塘底图（由 `assets/pond*.png` 高清原图经 `scripts/prepare-bed.py` 生成）；`assets/pond-bed.js` 是同一批 8K 底图的内嵌版本，由 `scripts/embed.mjs` 生成，只有 `file://` 页面（双击打开、Android、macOS、Wallpaper Engine）才加载，http(s) 页面直接读 PNG，`pond-data.js` 只保留荷花与花叶素材。`pond-bed.js` 约 169 MB，超过 GitHub 单文件上限，因此没有入库，`npm run build` 会重新生成 |
+| `assets/pond-runtime.png` | 四季池塘唯一权威底图（3840×2160 无损 PNG；仅保留 `pond-runtime.png` 及夏、秋、冬对应 PNG，构建只验证和复制，不改写画面、不重编码）；`assets/pond-bed.js` 是同一批 4K 底图的 JPEG q90 内嵌版本（约 10MB），只有 `file://` 页面（双击打开、macOS、Wallpaper Engine）才加载；Android 另有一份 2560×1440 的内嵌版本；http(s) 页面直接读无损 PNG，`pond-data.js` 只保留荷花与花叶素材。`pond-bed.js` 为生成文件不入库；Web 与各平台构建自动验证运行图并刷新内嵌数据，需 Node.js 与带 Pillow 的 Python，可用 `PYTHON` 指定解释器 |
 
-更换底图后，请同步更新 `core.js` 中的 `POND_MAP` 水域边界及 `scene.js` 的场景标注，先运行 `python scripts/prepare-bed.py` 生成运行版底图，再运行 `npm run build`（或 `node scripts/embed.mjs`）重新生成内嵌版本。
+改变底图构图后，请同步更新 `core.js` 中的 `POND_MAPS` 水域边界及 `scene.js` 的场景标注；仅缩放同一画面至 4K 不需要修改标注。运行 `npm run build`（或 `node scripts/embed.mjs`）会验证现有四张 4K PNG、生成缩略图及 JPEG q90 内嵌版本；构建不再依赖旧原图，也不改写底图。
 
 发布到 GitHub（创建公开仓库、推送代码，并把 `dist/` 中的各平台安装包发布为 Release）：
 
@@ -126,7 +126,7 @@ gh auth login              # 首次使用时登录
 
 ## 素材与服务
 
-当前池塘底图为用户提供的高清 PNG 插画（`assets/pond*.png`，7680×4320；`assets/pond*-runtime.png` 为同分辨率的 8K 运行版，`file://` 页面另有一份内嵌的 `pond-bed.js`；显卡纹理上限不足时自动缩放上传，坐标仍按 2560×1440 标注尺度映射）；锦鲤、小乌龟、蝴蝶、蜻蜓、水波、焦散与雨雪均由代码绘制。池水、树叶风声和鸟鸣使用有明确授权的自然录音，其余声音由代码合成。鱼的游动与投食共用 `core.js` 中的水域边界，不会进入岸边和露出水面的石头。画面标注见 [assets/ARTWORK.md](assets/ARTWORK.md)，录音来源、授权与处理说明见 [assets/audio/SOURCES.md](assets/audio/SOURCES.md)。本项目为独立复刻，非原作者官方版本。
+当前池塘底图为用户提供的高清 PNG 插画（`assets/pond*-runtime.png` 为唯一的 3840×2160 无损 PNG 底图；项目不再保留高于 4K 的底图，桌面、网页与 macOS 加载的无损 PNG 不做二次压缩；`file://` 页面另有一份 4K JPEG q90 的内嵌 `pond-bed.js`（约 10MB）；Android 为控制内存与包体积缩到 2560×1440（静图保持无损 PNG、内嵌 JPEG q90）；显卡纹理上限不足时自动缩放上传，坐标仍按 2560×1440 标注尺度映射）；锦鲤、小乌龟、蝴蝶、蜻蜓、水波、焦散与雨雪均由代码绘制。池水、树叶风声和鸟鸣使用有明确授权的自然录音，其余声音由代码合成。鱼的游动与投食共用 `core.js` 中的水域边界，不会进入岸边和露出水面的石头。画面标注见 [assets/ARTWORK.md](assets/ARTWORK.md)，录音来源、授权与处理说明见 [assets/audio/SOURCES.md](assets/audio/SOURCES.md)。本项目为独立复刻，非原作者官方版本。
 
 天气服务：[Open-Meteo](https://open-meteo.com/)，[地理编码文档](https://open-meteo.com/en/docs/geocoding-api)。公共免费接口主要面向非商业使用，商业发布前请按其现行条款配置服务。
 
@@ -138,7 +138,7 @@ gh auth login              # 首次使用时登录
 ./scripts/build-macos.sh
 ```
 
-生成 `dist/摸鱼.app` 和可拖拽安装的 `dist/摸鱼-<版本>.dmg`（当前 1.2.7），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
+生成 `dist/MoYu.app` 和可拖拽安装的 `dist/MoYu-<版本>.dmg`（当前 1.2.8），支持 macOS 12 及以上。构建工具链仍能链接 Intel 时生成通用二进制；当前机器的 macOS 27 SDK 已不含 x86_64 的 Swift 运行库，因此产物为 Apple 芯片（arm64）版本。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
 
 双击打开后，池塘即铺满每块屏幕的桌面背景层——位于系统壁纸上、桌面图标下，不影响正常使用桌面；多显示器与空间切换均支持。
 
@@ -154,7 +154,9 @@ gh auth login              # 首次使用时登录
 
 所有窗口（每块屏幕的壁纸与交互窗口）实时同步：在任一处改名、添加或放生锦鲤、切换天气与声音设置，其他窗口立即跟随，以最近一次修改为准；进食数量取各窗口中的较大值。右上角控制卡片会自动避让屏幕安全区域，短屏可在卡片内滚动。
 
-自检：`BICHI_SELFTEST=<输出目录> "dist/摸鱼.app/Contents/MacOS/BichiPond"` 会自动走一遍菜单操作（打开交互窗口、切换天气、改名同步、暂停与恢复、关闭窗口），逐项输出 PASS / FAIL 与帧率，把各阶段的壁纸截图存入该目录，完成后恢复原设置并退出。
+「设置 › 屏幕显示」可选三档，默认 **单屏幕显示**：只在主屏显示池塘；**多屏幕显示**让每块屏幕各自一个池塘；**多屏共用显示**用一个窗口铺满全部屏幕，画面连续，鱼可以游过屏幕边界。选择会记在 `~/Library/Preferences` 里，重启后直接按上次的方式铺开。
+
+自检：`BICHI_SELFTEST=<输出目录> "dist/MoYu.app/Contents/MacOS/BichiPond"` 会自动走一遍菜单操作（打开交互窗口、切换天气、改名同步、暂停与恢复、关闭窗口），逐项输出 PASS / FAIL 与帧率，把各阶段的壁纸截图存入该目录，完成后恢复原设置并退出。
 
 ## Windows 桌面动态壁纸
 
@@ -162,9 +164,9 @@ gh auth login              # 首次使用时登录
 ./scripts/build-windows.sh
 ```
 
-生成 `dist/摸鱼-Windows-<版本>.zip` 与独立安装器 `dist/摸鱼-<版本>.exe`（当前 1.2.7）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
+生成 `dist/MoYu-Windows-<版本>.zip` 与独立安装器 `dist/MoYu-<版本>.exe`（当前 1.2.8）。应用本体需要 .NET SDK 8 或更高版本构建（可在 macOS / Linux 上构建），程序基于 .NET Framework 4.8 与 WebView2（Edge 内核），二者都是 Windows 10 / 11 自带，用户无需另外安装任何东西；若 Windows 10 缺少 WebView2，程序会提示并打开下载页。
 
-安装器本身也是普通的 .NET Framework 4.8 程序（约 16MB），不做单文件自解压、不要求管理员权限，因此放在任何文件夹里双击都能直接运行，装到当前用户目录，快捷方式写入用户桌面与用户开始菜单，卸载信息写入 `HKCU`。安装时会把自身复制为安装目录下的 `uninstall.exe`，删除下载的安装包不影响卸载。
+安装器本身也是普通的 .NET Framework 4.8 程序（约 50MB，含 4K 底图），不做单文件自解压、不要求管理员权限，因此放在任何文件夹里双击都能直接运行，装到当前用户目录，快捷方式写入用户桌面与用户开始菜单，卸载信息写入 `HKCU`。安装时会把自身复制为安装目录下的 `uninstall.exe`，删除下载的安装包不影响卸载。
 
 使用：运行安装器，或解压便携版文件夹后双击 `BichiPond.exe`。池塘铺满每块屏幕的桌面背景，位于桌面图标之下（兼容 Windows 11 24H2 起改变的桌面层结构），不影响正常使用桌面。
 
@@ -172,6 +174,7 @@ gh auth login              # 首次使用时登录
 - 壁纸右上角常驻时钟天气卡片（自动避让顶部或侧边停靠的任务栏）：轻点“投喂”“声音”“沉浸”即时生效；轻点“我的锦鲤”“天气”“设置”会在桌面上浮出对应的面板（浮在桌面图标之上，可以直接操作），点面板外或按 Esc 收起；轻点卡片右上角的折叠按钮可把整张卡片缩成右上角一个圆形图标，再点一次展开（状态会记住）；轻点“沉浸”可整张收起，再点“退出沉浸”回来。
 - 通知区域的锦鲤图标（右键）：打开交互窗口（投喂、起名、天气、声音、设置）、切换四季、切换天气与月下观鱼、暂停壁纸动画、重载、开机时启动、退出；双击图标打开交互窗口。交互窗口里的改动即时同步到桌面壁纸。
 - 某块屏幕被最大化或全屏的窗口挡住、或锁屏时，这块屏幕的池塘停止绘制。
+- 「设置 › 屏幕显示」（默认单屏幕）：单屏幕显示只在主屏显示池塘；多屏幕显示让每块屏幕各自一个池塘；多屏共用显示用一块跨屏画布铺满所有屏幕，鱼可以游过屏幕边界。选择会写入 `%LOCALAPPDATA%\BichiPond\screen-mode.txt`，开机时直接按上次的方式铺开。
 - 资源管理器重启或显示器变化后自动重建壁纸；退出后桌面恢复为原来的系统壁纸。
 - 数据和出错日志保存在 `%LOCALAPPDATA%\BichiPond`。
 
@@ -185,11 +188,11 @@ gh auth login              # 首次使用时登录
 
 在 Windows 上手动打包时要注意：build-tools 里的 `aapt2.exe` 会把 APK 内的资源与 assets 条目写成 `assets\app.js` 这样的反斜杠路径，Android 按 `/` 解析，装上去会是一片空白。打包后需要把 ZIP 条目名里的 `\` 全部换成 `/`（保持 `resources.arsc` 不压缩），再做 `zipalign -f 4` 与 `apksigner sign`；`javac` 也要加 `-encoding UTF-8`。
 
-生成 `android/build/摸鱼.apk`，并复制到 `dist/摸鱼.apk`（约 38MB，版本 1.2.6；需 `~/android-build` 下的 JDK 17 与 Android 构建工具，以及带 Pillow 的 `python3`，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。手机版底图由 `scripts/prepare-mobile.py` 缩成 2560×1440 再打包：8K 的底图会生成 169MB 的内嵌脚本和每张 132MB 的位图，让手机的 WebView 内存溢出、壁纸一片空白（多数手机的纹理上限也只有 4096）。需要 Android 7.0（API 24）及以上。
+生成 `android/build/MoYu.apk`，并复制到 `dist/MoYu.apk`（需 `~/android-build` 下的 JDK 17、Android 构建工具、Node.js 与带 Pillow 的 Python，见脚本头部说明）。脚本每次都从当前网页源码重新拷贝资源，并沿用同一把签名密钥，新版本可直接覆盖安装，池塘里的锦鲤和设置都会保留。手机版底图由 `scripts/prepare-mobile.py` 从 4K 原图缩到 2560×1440：静态兜底存无损 PNG，`file://` 页面内嵌 JPEG（质量 90，约 0.5–1 MB/张），APK 合计约 32MB。直接放 4K 会让内嵌脚本涨到 60MB、每张解码位图约 33MiB，低端机容易内存溢出，而且多数手机的纹理上限只有 4096。现有按季加载、显卡纹理上限降采样和静态兜底保持不变。需要 Android 7.0（API 24）及以上。
 
 这是**手机桌面的动态壁纸**：池塘就在主屏幕（及系统允许时的锁屏）背景里游动，应用图标和小部件浮在水面上。
 
-- 安装后第一次点开图标，会直接进入系统的动态壁纸预览，点「设置壁纸」即可；以后也可以在应用设置里点「设为壁纸」，或在系统「壁纸」设置里选择动态壁纸「摸鱼」。
+- 安装后第一次点开图标，会直接进入系统的动态壁纸预览，点「设置壁纸」即可；以后也可以在应用设置里点「设为壁纸」，或在系统「壁纸」设置里选择动态壁纸「MoYu」。
 - 轻点桌面空白处投喂，锦鲤聚过来抢食；左右滑动翻页不会投喂。
 - 壁纸上不显示任何按钮；点应用图标（或壁纸预览里的「设置」）打开完整的池塘，可投喂、给锦鲤起名、切换天气与声音。改动会立即同步到桌面壁纸。
 - 桌面被应用挡住或熄屏时完全停止绘制，不耗电；显示时以 60 帧、按屏幕原生分辨率绘制（最高 3 倍像素密度）。设备跟不上时分两级自动降低精度（不低于 1 倍），页面每分钟在日志里记一行帧率与分辨率（`adb logcat | grep "\[pond\]"`）。

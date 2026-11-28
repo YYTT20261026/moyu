@@ -447,7 +447,7 @@ void main(){
       return this.nv++;
     }
   }
-  const WHITE = [1, 1, 1, 1];
+  const WHITE = [1, 1, 1, 1], QUAD_INDICES = [0, 1, 2, 0, 2, 3];
   const LAYERS = ['shadow', 'under', 'floaters', 'surface', 'plantShadow', 'plants', 'airShadow', 'air', 'glow'];
 
   // Shelf-pack misc sprites under the fish cells.
@@ -465,10 +465,13 @@ void main(){
   }
 
   // Geometry shared by both backends: world-space corners for a sprite and the koi body strip.
-  function spriteCorners(def, x, y, angle, sx, sy) {
+  function spriteCorners(def, x, y, angle, sx, sy, pts) {
     const w = def.w / def.ppu * sx, h = def.h / def.ppu * sy, ox = -def.px * w, oy = -def.py * h, c = Math.cos(angle), s = Math.sin(angle);
-    const pts = [[ox, oy], [ox + w, oy], [ox + w, oy + h], [ox, oy + h]];
-    return pts.map(([a, b]) => [x + a * c - b * s, y + a * s + b * c]);
+    for (let i = 0; i < 4; i++) {
+      const a = i === 1 || i === 2 ? ox + w : ox, b = i >= 2 ? oy + h : oy;
+      pts[i][0] = x + a * c - b * s; pts[i][1] = y + a * s + b * c;
+    }
+    return pts;
   }
 
   // Fit the W×H painting to a w×h screen, cropping like CSS 'cover'. On a portrait screen the painting (a pond seen
@@ -485,60 +488,80 @@ void main(){
     return [(e * x - b * y) / det * w, (a * y - d * x) / det * h];
   }
 
-  // The painting can be any resolution (the bed is 8K), but every annotation lives in the
+  // The authoritative painting is 4K, but every annotation lives in the
   // 2560×1440 design space of POND_MAP. Coordinates below are design pixels, so a sharper
   // bed image only changes the texture, never where the lotus, rocks or koi sit.
   function createGL(canvas, bedImage, sprites, onLost, floatMask, design) {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'default' });
     if (!gl) return null;
+    const resources = { Shader: new Set(), Program: new Set(), Texture: new Set(), Framebuffer: new Set(), Buffer: new Set(), VertexArray: new Set() };
+    let lost = false, disposed = false, checkFrame = true, clearState = () => {};
+    function track(kind, resource) {
+      if (!resource) throw Error(`pond ${kind} unavailable`);
+      resources[kind].add(resource); return resource;
+    }
+    function release(kind, resource) {
+      if (resources[kind].delete(resource)) gl[`delete${kind}`](resource);
+    }
+    function contextLost() { if (disposed || lost) return; lost = true; if (onLost) onLost(); }
+    function dispose() {
+      if (disposed) return;
+      disposed = true; lost = true;
+      canvas.removeEventListener('webglcontextlost', contextLost);
+      gl.useProgram(null);
+      for (const kind of Object.keys(resources)) for (const resource of resources[kind]) release(kind, resource);
+      clearState(); onLost = null;
+    }
+    try {
+    canvas.addEventListener('webglcontextlost', contextLost, { once: true });
     // 0 means "not given": coordinates then follow the bed image's own pixel size, as before.
     const designW = (design && design.width) || 0, designH = (design && design.height) || 0;
     const floatRT = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
     gl.getExtension('OES_texture_float_linear');
-    let lost = false;
-    canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); lost = true; }, { once: true });
-    canvas.addEventListener('webglcontextrestored', () => onLost && onLost(), { once: true });
 
-    function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(s)); return s; }
+    function shader(type, src) { const s = track('Shader', gl.createShader(type)); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(s)); return s; }
     function program(vs, fs) {
-      const p = gl.createProgram(); gl.attachShader(p, shader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+      const p = track('Program', gl.createProgram()), vertex = shader(gl.VERTEX_SHADER, vs), fragment = shader(gl.FRAGMENT_SHADER, fs);
+      gl.attachShader(p, vertex); gl.attachShader(p, fragment);
       gl.bindAttribLocation(p, 0, 'aPos'); gl.bindAttribLocation(p, 1, 'aUv'); gl.bindAttribLocation(p, 2, 'aColor'); gl.bindAttribLocation(p, 3, 'aFog'); gl.bindAttribLocation(p, 4, 'aLight');
       gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(p));
+      gl.detachShader(p, vertex); gl.detachShader(p, fragment); release('Shader', vertex); release('Shader', fragment);
       const cache = {}; p.u = n => (n in cache ? cache[n] : (cache[n] = gl.getUniformLocation(p, n)));
       return p;
     }
     const P = { drop: program(VS_QUAD, FS_DROP), sim: program(VS_QUAD, FS_SIM), caustic: program(VS_QUAD, FS_CAUSTIC), bed: program(VS_QUAD, FS_BED), sprite: program(VS_SPRITE, FS_SPRITE), surface: program(VS_QUAD, FS_SURFACE), final: program(VS_QUAD, FS_FINAL), floater: program(VS_FLOAT, FS_FLOAT), cloud: program(VS_QUAD, FS_CLOUD) };
 
-    const quadVao = gl.createVertexArray(); gl.bindVertexArray(quadVao);
-    const qb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const quadVao = track('VertexArray', gl.createVertexArray()); gl.bindVertexArray(quadVao);
+    const qb = track('Buffer', gl.createBuffer()); gl.bindBuffer(gl.ARRAY_BUFFER, qb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    const spriteVao = gl.createVertexArray(); gl.bindVertexArray(spriteVao);
-    const vbo = gl.createBuffer(), ibo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    const spriteVao = track('VertexArray', gl.createVertexArray()); gl.bindVertexArray(spriteVao);
+    const vbo = track('Buffer', gl.createBuffer()), ibo = track('Buffer', gl.createBuffer()); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     for (const [loc, n, off] of [[0, 2, 0], [1, 2, 8], [2, 4, 16], [3, 4, 32], [4, 4, 48]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, STRIDE * 4, off); }
     gl.bindVertexArray(null);
 
     function texture(w, h, internal, format, type, data, filter = gl.LINEAR, wrap = gl.CLAMP_TO_EDGE) {
-      const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+      const t = track('Texture', gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, data || null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter === gl.LINEAR_MIPMAP_LINEAR ? gl.LINEAR : filter);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
       return t;
     }
     function target(w, h, internal, format, type) {
-      const tex = texture(w, h, internal, format, type), fb = gl.createFramebuffer();
+      const tex = texture(w, h, internal, format, type), fb = track('Framebuffer', gl.createFramebuffer());
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
       const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      return ok ? { tex, fb, w, h } : null;
+      if (!ok) { release('Texture', tex); release('Framebuffer', fb); return null; }
+      return { tex, fb, w, h };
     }
-    function freeTarget(t) { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } }
+    function freeTarget(t) { if (t) { release('Texture', t.tex); release('Framebuffer', t.fb); } }
 
     // Noise channels are data, not colour: keep them un-premultiplied. Sprites below are premultiplied.
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     const noiseTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, noiseData(256), gl.LINEAR, gl.REPEAT);
     const waveTex = texture(256, 256, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, waveData(256), gl.LINEAR, gl.REPEAT);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    // An 8K painting exceeds the texture limit of some GPUs (often 4096). Upload the largest
+    // A painting may exceed a device's texture limit. Upload the largest
     // size the device accepts instead: sampling is normalized, so the painting and every
     // design-space annotation still line up exactly.
     const maxTex = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 0;
@@ -549,11 +572,11 @@ void main(){
       c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
       return c;
     }
-    let bedTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, bedTex);
+    let bedTex = track('Texture', gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, bedTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, fitTexture(bedImage)); gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    let floatTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, floatTex);
+    let floatTex = track('Texture', gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, floatTex);
     if (floatMask) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, fitTexture(floatMask));
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
     gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -562,15 +585,17 @@ void main(){
     // are prepared once, so a later selection only swaps texture references.
     const backgrounds = new Map([[bedImage,{bed:bedTex,mask:floatTex}]]);
     function prepareBackground(image,mask) {
-      if(backgrounds.has(image)||lost)return;
+      if(disposed||lost||backgrounds.has(image))return;
+      const textures = [];
       const upload=source=>{
-        const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+        const tex=track('Texture',gl.createTexture());textures.push(tex);gl.bindTexture(gl.TEXTURE_2D,tex);
         gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,fitTexture(source));gl.generateMipmap(gl.TEXTURE_2D);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
         return tex;
       };
-      backgrounds.set(image,{bed:upload(image),mask:upload(mask)});
+      try { backgrounds.set(image,{bed:upload(image),mask:upload(mask)}); }
+      catch (error) { for (const tex of textures) release('Texture', tex); throw error; }
     }
     const atlas = texture(ATLAS, ATLAS, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null, gl.LINEAR_MIPMAP_LINEAR);
     packSprites(sprites);
@@ -579,11 +604,18 @@ void main(){
     let atlasDirty = true;
 
     const state = { w: 1, h: 1, dpr: 1, quality: 'high', displayMode: 'auto', scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
-    const drops = [];
+    const drops = [], dropUniforms = new Float32Array(96), spritePoints = [[0, 0], [0, 0], [0, 0], [0, 0]];
     const batches = {}; for (const l of LAYERS) batches[l] = new Batch();
+    clearState = () => {
+      drops.length = 0; backgrounds.clear();
+      for (const l of LAYERS) { batches[l].reset(); batches[l].f = batches[l].ix = null; }
+      state.scene = state.shadow = state.caustic = state.surface = state.cloud = null; state.sim = [null, null];
+      bedTex = floatTex = bedImage = floatMask = null;
+    };
 
     function resize(w, h, dpr, quality, displayMode = 'auto') {
-      if(state.scene&&state.w===w&&state.h===h&&state.dpr===dpr&&state.quality===quality&&state.displayMode===displayMode)return;
+      if(disposed||lost)return;
+      if(state.scene&&state.shadow&&state.cloud&&state.caustic&&state.surface&&state.w===w&&state.h===h&&state.dpr===dpr&&state.quality===quality&&state.displayMode===displayMode)return;
       Object.assign(state, { w, h, dpr, quality, displayMode });
       const px = w * h * dpr * dpr, cap = quality === 'eco' ? 1.6e6 : 3.6e6, k = px > cap ? Math.sqrt(cap / px) : 1;
       canvas.width = Math.max(1, Math.round(w * dpr * k)); canvas.height = Math.max(1, Math.round(h * dpr * k));
@@ -593,15 +625,17 @@ void main(){
       // mipmaps let the bed blur them where the light is soft.
       const sd = quality === 'eco' ? 3 : 2;
       state.shadow = target(Math.ceil(w / sd), Math.ceil(h / sd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      gl.bindTexture(gl.TEXTURE_2D, state.shadow.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.generateMipmap(gl.TEXTURE_2D);
       state.cloud = target(Math.ceil(w / 8), Math.ceil(h / 8), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       const cd = quality === 'eco' ? 3 : 2;
       state.caustic = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       state.surface = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       const cell = quality === 'eco' ? 4 : 3;
       state.simW = Math.min(900, Math.ceil(w / cell)); state.simH = Math.min(900, Math.ceil(h / cell));
+      if (!state.scene || !state.shadow || !state.cloud || !state.caustic || !state.surface) throw Error('pond framebuffer unavailable');
+      gl.bindTexture(gl.TEXTURE_2D, state.shadow.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.generateMipmap(gl.TEXTURE_2D);
       state.sim = floatRT ? [0, 1].map(() => target(state.simW, state.simH, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT)) : [null, null];
-      if (!state.sim[0] || !state.sim[1]) state.sim = [null, null];
+      if (!state.sim[0] || !state.sim[1]) { state.sim.forEach(freeTarget); state.sim = [null, null]; }
+      checkFrame = true;
       for (const t of state.sim) if (t) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       state.bed = fitBed(bedImage.width, bedImage.height, w, h, true, displayMode);
@@ -612,7 +646,7 @@ void main(){
     function setBed(p) { gl.uniform3fv(p.u('uBedU'), state.bed.u); gl.uniform3fv(p.u('uBedV'), state.bed.v); }
 
     function setFish(i, sprite) {
-      if (i >= MAX_FISH) return;
+      if (disposed || lost || i >= MAX_FISH) return;
       const [x, y] = cellOrigin(i);
       gl.bindTexture(gl.TEXTURE_2D, atlas);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, sprite);
@@ -645,7 +679,8 @@ void main(){
     }
 
     function render(time, dt, env) {
-      if (lost || gl.isContextLost()) { for (const l of LAYERS) batches[l].reset(); drops.length = 0; return; }
+      if (disposed) return false;
+      if (lost || gl.isContextLost()) { for (const l of LAYERS) batches[l].reset(); drops.length = 0; return false; }
       if (atlasDirty) { gl.bindTexture(gl.TEXTURE_2D, atlas); gl.generateMipmap(gl.TEXTURE_2D); atlasDirty = false; }
       lightDir = env.sun; lightK = env.sunK;
       gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
@@ -654,14 +689,19 @@ void main(){
       if (state.sim[0]) {
         gl.disable(gl.BLEND); gl.viewport(0, 0, state.simW, state.simH);
         const aspect = w / h;
-        while (drops.length) {
-          const batch = drops.splice(0, 24), p = P.drop, arr = new Float32Array(96);
+        for (let start = 0; start < drops.length; start += 24) {
+          const count = Math.min(24, drops.length - start), p = P.drop, arr = dropUniforms;
           const minR = 2.6 * h / state.simH;
-          batch.forEach((d, i) => { const r = Math.max(d[2], minR); arr.set([d[0] / w, 1 - d[1] / h, r / h, d[3] * Math.min(1, d[2] / r + .25)], i * 4); });
-          gl.useProgram(p); gl.uniform4fv(p.u('uDrops'), arr); gl.uniform1i(p.u('uCount'), batch.length); gl.uniform1f(p.u('uAspect'), aspect);
+          arr.fill(0);
+          for (let i = 0; i < count; i++) {
+            const d = drops[start + i], r = Math.max(d[2], minR), offset = i * 4;
+            arr[offset] = d[0] / w; arr[offset + 1] = 1 - d[1] / h; arr[offset + 2] = r / h; arr[offset + 3] = d[3] * Math.min(1, d[2] / r + .25);
+          }
+          gl.useProgram(p); gl.uniform4fv(p.u('uDrops'), arr); gl.uniform1i(p.u('uCount'), count); gl.uniform1f(p.u('uAspect'), aspect);
           bindTex(0, state.sim[0].tex); gl.uniform1i(p.u('uState'), 0);
           gl.bindFramebuffer(gl.FRAMEBUFFER, state.sim[1].fb); drawQuad(); state.sim.reverse();
         }
+        drops.length = 0;
         state.simAcc = Math.min(state.simAcc + dt * 90, 4);
         const p = P.sim; gl.useProgram(p); gl.uniform2f(p.u('uTexel'), 1 / state.simW, 1 / state.simH); gl.uniform1f(p.u('uDamp'), .975); gl.uniform1f(p.u('uAspect'), aspect);
         setBed(p); bindTex(1, floatTex); gl.uniform1i(p.u('uFloat'), 1);
@@ -751,20 +791,31 @@ void main(){
       gl.blendFunc(gl.ONE, gl.ONE);
       drawBatch(batches.glow, 2, 0, 0);
       for (const l of LAYERS) batches[l].reset();
+      // Allocation and texture uploads can fail with a GL error, without throwing in JavaScript.
+      if (checkFrame) { checkFrame = false; if (gl.getError() !== gl.NO_ERROR) throw Error('pond WebGL frame failed'); }
+      return true;
     }
 
     const api = {
-      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setFish, render, prepareBackground,
-      setBackground(image, mask) {
+      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setFish, render, prepareBackground, dispose,
+      setBackground(image, mask, keepOnly = false) {
         prepareBackground(image,mask);if(lost)return;
         bedImage=image;
         const cached=backgrounds.get(image);bedTex=cached.bed;floatTex=cached.mask;
+        // keepOnly: a phone or the live wallpaper keeps just the season on screen ('lightBackdrops' in app.js).
+        // The other beds and masks are several hundred MB of textures; a visited season would otherwise stay
+        // resident for the life of the page. Coming back re-uploads it on demand, as a first visit would.
+        if (keepOnly) for (const [other, entry] of backgrounds) {
+          if (other === image) continue;
+          release('Texture', entry.bed); release('Texture', entry.mask); backgrounds.delete(other);
+        }
         state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);
-        drops.length=0;
+        drops.length=0;checkFrame=true;
       },
-      drop(x, y, r, s) { if (drops.length < 96) drops.push([x, y, r, s]); },
+      drop(x, y, r, s) { if (!disposed && !lost && drops.length < 96) drops.push([x, y, r, s]); },
       // One leaf, flower or rock from the painting (design-space ellipse), turned by angle and moved by (dx, dy) screen px.
       floater(ix, iy, irx, iry, rot, angle, dx, dy, push, snowK = 1, wetKind = 1, pool = 0, seed = 0) {
+        if (disposed || lost) return;
         const b = batches.floaters, W = designW || bedImage.width, H = designH || bedImage.height, [sx, sy] = imageToScreen(ix, iy), m = 1.08;
         const [x0, y0] = imageToScreen(0, 0), [x1, y1] = imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0), turn = state.bed.turn * Math.PI / 2;
         const cr = Math.cos(rot), sr = Math.sin(rot), ca = Math.cos(rot + angle + turn), sa = Math.sin(rot + angle + turn), n = b.nv, pr = Math.max(irx, iry) * k + 3;
@@ -774,17 +825,19 @@ void main(){
           const ex = lx * irx, ey = ly * iry;
           b.vert(sx + dx + (ex * ca - ey * sa) * k, sy + dy + (ex * sa + ey * ca) * k, (ix + ex * cr - ey * sr) / W, (iy + ex * sr + ey * cr) / H, [lx, ly, push, snowK], probe, wetKind, pool, seed);
         }
-        b.ix.set([n, n + 1, n + 2, n, n + 2, n + 3], b.ni); b.ni += 6;
+        for (const index of QUAD_INDICES) b.ix[b.ni++] = n + index;
       },
       sprite(layer, def, x, y, angle, sx, sy, color = WHITE, fog) {
+        if (disposed || lost) return;
         const b = batches[layer]; b.ensure(4, 6);
-        const c = spriteCorners(def, x, y, angle, sx, sy), n = b.nv;
+        const c = spriteCorners(def, x, y, angle, sx, sy, spritePoints), n = b.nv;
         b.vert(c[0][0], c[0][1], def.u0, def.v0, color, fog); b.vert(c[1][0], c[1][1], def.u1, def.v0, color, fog);
         b.vert(c[2][0], c[2][1], def.u1, def.v1, color, fog); b.vert(c[3][0], c[3][1], def.u0, def.v1, color, fog);
-        b.ix.set([n, n + 1, n + 2, n, n + 2, n + 3], b.ni); b.ni += 6;
+        for (const index of QUAD_INDICES) b.ix[b.ni++] = n + index;
       },
       // A small grid lets leaf rims curl and stalks bend without moving the root.
       plant(layer, def, x, y, angle, sx, sy, bend, leaf, unit, color = WHITE, fog) {
+        if (disposed || lost) return;
         const b = batches[layer], cols = 8, rows = 6, n = b.nv;
         const w = def.w / def.ppu * sx, h = def.h / def.ppu * sy, ca = Math.cos(angle), sa = Math.sin(angle);
         b.ensure((cols + 1) * (rows + 1), cols * rows * 6);
@@ -803,7 +856,7 @@ void main(){
       // Koi body strip along the posed spine; pose from PondCore.fishPose, k scales about (cx, cy) for depth.
       // light: { widths: body half-width / strip half-height per spine point, metal, gloss } for relighting.
       fish(layer, cell, pose, s, cx, cy, k, color = WHITE, fog, dx = 0, dy = 0, light) {
-        if (cell >= MAX_FISH) return;
+        if (disposed || lost || cell >= MAX_FISH) return;
         const b = batches[layer], n = BODY.segments, [ox, oy] = cellOrigin(cell), hh = BODY.half * s * k;
         const v0 = oy / ATLAS, v1 = (oy + CELL_H) / ATLAS, u0 = ox / ATLAS, du = CELL_W / ATLAS;
         b.ensure((n + 3) * 2, (n + 2) * 6);
@@ -822,6 +875,7 @@ void main(){
       }
     };
     return api;
+    } catch (error) { dispose(); throw error; }
   }
 
   // Draw a koi sprite along a posed spine with Canvas 2D, one slice per segment.
@@ -852,7 +906,7 @@ void main(){
     const designW = (design && design.width) || 0, designH = (design && design.height) || 0;
     const state = { w: 1, h: 1, dpr: 1, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } }, fishCanvases = [], rings = [], queue = {};
     for (const l of LAYERS) queue[l] = [];
-    const masks = new WeakMap();
+    let masks = new WeakMap(), disposed = false;
     const foregroundMask = mask => {
       if (!mask) return null;
       if (masks.has(mask)) return masks.get(mask);
@@ -865,24 +919,32 @@ void main(){
     let foreground = null;
     return {
       kind: '2d', ripples: false, sprites,
-      prepareBackground(image, mask) { foregroundMask(mask); },
-      setBackground(image, mask) { bedImage=image;floatMask=mask;foreground=null;state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);rings.length=0; },
+      dispose() {
+        if (disposed) return;
+        disposed = true; fishCanvases.length = rings.length = 0;
+        for (const l of LAYERS) queue[l].length = 0;
+        foreground = bedImage = floatMask = null; masks = new WeakMap();
+      },
+      prepareBackground(image, mask) { if (!disposed) foregroundMask(mask); },
+      setBackground(image, mask) { if(disposed)return;bedImage=image;floatMask=mask;foreground=null;state.bed=fitBed(image.width,image.height,state.w,state.h,true,state.displayMode);rings.length=0; },
       resize(w, h, dpr, quality, displayMode = 'auto') {
+        if (disposed) return;
         Object.assign(state, { w, h, dpr: Math.min(dpr, 1.5), displayMode });
         canvas.width = Math.round(w * state.dpr); canvas.height = Math.round(h * state.dpr);
         // app.js maps the CSS backdrop with these same corners, including the portrait turn.
         state.bed = fitBed(bedImage.width, bedImage.height, w, h, true, displayMode);
       },
       imageToScreen(x, y) { return bedToScreen(state.bed, x / (designW || bedImage.width), y / (designH || bedImage.height), state.w, state.h); },
-      setFish(i, sprite) { const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },
-      drop(x, y, r, s) { if (s > .05 && rings.length < 2) rings.push({ x, y, age: 0, max: 1.2 }); },
+      setFish(i, sprite) { if (disposed) return; const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },
+      drop(x, y, r, s) { if (!disposed && s > .05 && rings.length < 2) rings.push({ x, y, age: 0, max: 1.2 }); },
       floater() {},
-      sprite(layer, def, x, y, angle, sx, sy, color = WHITE) { if (layer !== 'shadow' && layer !== 'airShadow') queue[layer].push(['s', def, x, y, angle, sx, sy, color[3]]); },
+      sprite(layer, def, x, y, angle, sx, sy, color = WHITE) { if (!disposed && layer !== 'shadow' && layer !== 'airShadow') queue[layer].push(['s', def, x, y, angle, sx, sy, color[3]]); },
       plant(layer, def, x, y, angle, sx, sy, bend, leaf, unit, color = WHITE) {
-        queue[layer].push(['p', def, x, y, angle, sx, sy, bend, leaf, color[3]]);
+        if (!disposed) queue[layer].push(['p', def, x, y, angle, sx, sy, bend, leaf, color[3]]);
       },
-      fish(layer, cell, pose, s, cx, cy, k, color = WHITE) { if (layer === 'under' && fishCanvases[cell]) queue[layer].push(['f', fishCanvases[cell], Float32Array.from(pose), s, cx, cy, k, color[3]]); },
+      fish(layer, cell, pose, s, cx, cy, k, color = WHITE) { if (!disposed && layer === 'under' && fishCanvases[cell]) queue[layer].push(['f', fishCanvases[cell], Float32Array.from(pose), s, cx, cy, k, color[3]]); },
       render(time, dt, env) {
+        if (disposed) return false;
         ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0); ctx.clearRect(0, 0, state.w, state.h);
         for (const l of LAYERS) {
           ctx.globalCompositeOperation = l === 'glow' ? 'lighter' : 'source-over';
@@ -928,8 +990,8 @@ void main(){
   // Returns the renderer and the canvas it drew on (a fresh one if WebGL grabbed the original and then failed).
   // design is the painting's annotation space (POND_MAP.width×height); it defaults to the bed's own
   // pixel size, so a bed already drawn at design resolution behaves exactly as before.
-  function createRenderer(canvas, bedImage, sprites, onLost, floatMask, design) {
-    try { const r = createGL(canvas, bedImage, sprites, onLost, floatMask, design); if (r) return Object.assign(r, { canvas }); } catch (e) { console.warn('WebGL2 pond unavailable, using 2D', e); }
+  function createRenderer(canvas, bedImage, sprites, onLost, floatMask, design, force2D = false) {
+    if (!force2D) try { const r = createGL(canvas, bedImage, sprites, onLost, floatMask, design); if (r) return Object.assign(r, { canvas }); } catch (e) { console.warn('WebGL2 pond unavailable, using 2D', e); }
     let target = canvas, r = create2D(target, bedImage, sprites, design, floatMask);
     if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites, design, floatMask); }
     return r && Object.assign(r, { canvas: target });

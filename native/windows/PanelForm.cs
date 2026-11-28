@@ -1,4 +1,4 @@
-// 碧池观鱼 · the small window above the desktop icons that shows one panel (我的锦鲤 / 天气 / 设置).
+// MoYu · the small window above the desktop icons that shows one panel (我的锦鲤 / 天气 / 设置).
 // The wallpaper itself lives behind the icons, so a panel opened there would be covered by them; this window
 // floats on top instead, takes the keyboard while it is open, and closes as soon as it loses focus.
 //

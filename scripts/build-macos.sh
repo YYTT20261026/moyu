@@ -1,12 +1,12 @@
 #!/bin/zsh
-# 碧池观鱼 · build the standalone macOS desktop-wallpaper app into dist/碧池观鱼.app,
+# MoYu · build the standalone macOS desktop-wallpaper app into dist/MoYu.app,
 # a universal binary (Apple silicon + Intel, macOS 12+), plus a drag-to-install disk image.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/dist/摸鱼.app"
+APP="$ROOT/dist/MoYu.app"
 CONTENTS="$APP/Contents"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/native/macos/Info.plist")"
-DMG="$ROOT/dist/摸鱼-$VERSION.dmg"
+DMG="$ROOT/dist/MoYu-$VERSION.dmg"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -33,7 +33,9 @@ for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do
   cp "$ROOT/$f" "$CONTENTS/Resources/$f"
 done
 cp "$ROOT"/assets/pond*runtime.png "$ROOT"/assets/pond-*-thumb.jpg "$ROOT/assets/pond-data.js" "$ROOT/assets/pond-bed.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/drifting-flora.png" "$ROOT/assets/drifting-flora.json" "$ROOT/assets/favicon.svg" "$CONTENTS/Resources/assets/"
-cp -R "$ROOT/assets/audio" "$CONTENTS/Resources/assets/"
+# Only the attribution: the recordings themselves are embedded in audio-data.js.
+mkdir -p "$CONTENTS/Resources/assets/audio"
+cp "$ROOT/assets/audio/SOURCES.md" "$CONTENTS/Resources/assets/audio/"
 
 echo "▸ Generating app icon…"
 # assets/app-icon.png: 1024 px, drawn on Apple's icon grid (824 px rounded square with its own shadow).
@@ -64,9 +66,9 @@ codesign --verify --strict "$APP"
 echo "▸ Packing disk image…"
 STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/摸鱼.app"
+ditto "$APP" "$STAGE/MoYu.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -quiet -volname "摸鱼" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG"
+hdiutil create -quiet -volname "MoYu" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG"
 
 echo "✓ Built $APP ($(lipo -archs "$CONTENTS/MacOS/BichiPond"))"
 echo "✓ Packed $DMG"

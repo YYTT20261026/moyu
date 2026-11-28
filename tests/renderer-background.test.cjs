@@ -6,6 +6,7 @@ const core=require('../core.js');
 
 function renderer(kind='webgl2',bed,design){
   const calls=[],constants=new Map();let id=0;
+  const faults={};
   const gl=new Proxy({}, {get(_,name){
     if(typeof name==='string'&&name===name.toUpperCase()){
       if(!constants.has(name))constants.set(name,++id);return constants.get(name);
@@ -14,7 +15,9 @@ function renderer(kind='webgl2',bed,design){
       calls.push([name,...args]);
       if(name.startsWith('create'))return {id:++id};
       if(name==='getExtension'||name==='getShaderParameter'||name==='getProgramParameter')return true;
-      if(name==='checkFramebufferStatus')return gl.FRAMEBUFFER_COMPLETE;
+      if(name==='checkFramebufferStatus')return faults.framebuffer?gl.FRAMEBUFFER_UNSUPPORTED:gl.FRAMEBUFFER_COMPLETE;
+      if(name==='getError')return faults.upload?gl.OUT_OF_MEMORY:gl.NO_ERROR;
+      if(name==='isContextLost')return !!faults.lost;
       if(name==='getUniformLocation')return args[1];
     };
   }});
@@ -32,8 +35,49 @@ function renderer(kind='webgl2',bed,design){
   const image=bed||{width:2560,height:1440},mask={width:image.width/2,height:image.height/2};
   const r=context.window.PondGL.createRenderer(canvas,image,{},null,mask,design);
   assert.equal(r.kind,kind);
-  return {r,calls,image,mask,canvas};
+  return {r,calls,image,mask,canvas,faults,createRenderer:context.window.PondGL.createRenderer};
 }
+
+test('WebGL 目标或贴图失败时可保留底图并切换到 Canvas，丢失上下文不算成功出帧',()=>{
+  const {r,calls,faults,canvas,image,mask,createRenderer}=renderer();
+  faults.framebuffer=true;
+  assert.throws(()=>r.resize(390,844,2,'high'),/framebuffer unavailable/);
+  assert.ok(calls.some(c=>c[0]==='deleteFramebuffer'),'失败的帧缓冲也应释放');
+  faults.framebuffer=false;r.resize(390,844,2,'high');
+  faults.lost=true;assert.equal(r.render(0,0,{}),false);faults.lost=false;
+  const env={sun:[-.45,.45,.77],shadowDir:[.7,.72],cloudWind:[20,-7],moonDisc:[0,0,1,0]};
+  faults.upload=true;assert.throws(()=>r.render(0,0,env),/WebGL frame failed/);
+  calls.length=0;
+  const fallback=createRenderer(canvas,image,{},null,mask,undefined,true);
+  assert.equal(fallback.kind,'2d');fallback.resize(390,844,2,'high');
+  assert.deepEqual(Array.from(fallback.imageToScreen(0,0)),Array.from(r.imageToScreen(0,0)));
+  assert.ok(!calls.some(c=>c[0]==='texImage2D'),'降级后不再申请 WebGL 贴图');
+});
+
+test('内嵌底图解码失败后仍可读安装包里的同季 PNG，再次请求复用成功结果',async()=>{
+  const app=fs.readFileSync(require.resolve('../app.js'),'utf8');
+  const attempts=[];
+  class Image {
+    set src(src){this.url=src;attempts.push(src);queueMicrotask(()=>this.onload());}
+    decode(){return this.url.startsWith('data:')?Promise.reject(Error('decode failed')):Promise.resolve();}
+  }
+  const context={window:{POND_IMAGES:{winter:'data:bad'}},backgroundCache:new Map(),backgroundSizes:new Map(),SEASONS:core.SEASONS,Image};
+  vm.runInNewContext(app.slice(app.indexOf('function loadBackground('),app.indexOf('async function syncSeason(')),context);
+  const request=context.loadBackground('winter');
+  assert.equal((await request).url,core.SEASONS.winter.image);
+  assert.equal(context.loadBackground('winter'),request);
+  assert.deepEqual(attempts,['data:bad',core.SEASONS.winter.image]);
+});
+
+test('安卓壁纸先绘制本地静图，等 WebView 画面可合成后才允许替换',()=>{
+  const source=fs.readFileSync(require.resolve('../android/java/com/bichi/koipond/PondWallpaperService.java'),'utf8');
+  const host=fs.readFileSync(require.resolve('../android/java/com/bichi/koipond/PondWeb.java'),'utf8');
+  const app=fs.readFileSync(require.resolve('../app.js'),'utf8');
+  assert.match(source,/if \(bridge\) \{\s*drawStill\(\);[^\n]*\n\s*startBridge\(/);
+  assert.match(source,/if \(!pondFrameReady \|\| holder == null \|\| r != reader\) return;[\s\S]*?canvas\.drawBitmap\(bitmap/);
+  assert.match(host,/pondFrameReady\(\)[\s\S]*?postVisualStateCallback[\s\S]*?onPondFrame\.accept\(owner\)/);
+  assert.match(app,/rendered=renderer\.render[\s\S]*?if\(rendered!==false\)[\s\S]*?PondHost\?\.pondFrameReady/);
+});
 
 test('季节预热只上传一次纹理，反复切换不分配帧缓冲、不重传图片、不改变画布大小',()=>{
   const {r,calls,image,mask,canvas}=renderer();r.resize(1280,720,2,'high');
@@ -80,13 +124,14 @@ test('阴雨雪切回晴天清空已有云影贴图，晴天不生成云影，�
   }
 });
 
-for(const kind of ['webgl2','2d'])test(`${kind}：8K 底图仍按 2560×1440 标注尺度映射，切换底图不移动荷叶与鱼`,()=>{
+// Virtual image dimensions only: the oversized compatibility case never loads an 8K artwork file.
+for(const [width,height,label] of [[3840,2160,'4K'],[7680,4320,'超大输入兼容']])for(const kind of ['webgl2','2d'])test(`${kind}：${label} 底图仍按 2560×1440 标注尺度映射，切换底图不移动荷叶与鱼`,()=>{
   const small=renderer(kind);small.r.resize(1280,720,1,'high');
-  const big=renderer(kind,{width:7680,height:4320},{width:2560,height:1440});big.r.resize(1280,720,1,'high');
+  const big=renderer(kind,{width,height},{width:2560,height:1440});big.r.resize(1280,720,1,'high');
   for(const [x,y] of [[0,0],[110,365],[690,930],[2560,1440]])assert.deepEqual(
-    Array.from(big.r.imageToScreen(x,y)),Array.from(small.r.imageToScreen(x,y)),'8K 底图与设计尺度的屏幕位置一致'
+    Array.from(big.r.imageToScreen(x,y)),Array.from(small.r.imageToScreen(x,y)),`${label} 底图与设计尺度的屏幕位置一致`
   );
-  big.r.setBackground({width:7680,height:4320},{width:2560,height:1440});
+  big.r.setBackground({width,height},{width:2560,height:1440});
   for(const [x,y] of [[0,0],[110,365],[2560,1440]])assert.deepEqual(
     Array.from(big.r.imageToScreen(x,y)),Array.from(small.r.imageToScreen(x,y)),'换底图后无需 resize'
   );
@@ -158,7 +203,7 @@ for(const [w,h,mode] of [[1280,720,'auto'],[390,844,'auto'],[2560,720,'dual']])t
   }
 });
 
-test('Canvas CSS 底图同步前景遮罩的旋转裁切，切回 WebGL 清除后备样式',()=>{
+test('CSS 底图同步 Canvas 和待出帧 WebGL 的旋转裁切，无渲染器时清除临时样式',()=>{
   const source=fs.readFileSync(require.resolve('../app.js'),'utf8');
   const sync=source.slice(source.indexOf('function syncBackdrop(){'),source.indexOf('function resize(){'));
   for(const [w,h,mode] of [[1280,720,'auto'],[390,844,'auto'],[2560,720,'dual']]){
@@ -171,7 +216,10 @@ test('Canvas CSS 底图同步前景遮罩的旋转裁切，切回 WebGL 清除�
       const expected=r.imageToScreen(x,y),actual=[a*x+c*y+e,b*x+d*y+f];
       actual.forEach((value,i)=>assert.ok(Math.abs(value-expected[i])<1e-8,'CSS 底图与鱼、前景遮罩一致'));
     }
-    context.renderer={kind:'webgl2'};vm.runInNewContext('syncBackdrop();',context);
+    const transform=bed.style.transform;
+    context.renderer={kind:'webgl2',imageToScreen:r.imageToScreen};vm.runInNewContext('syncBackdrop();',context);
+    assert.equal(bed.style.transform,transform,'WebGL 首帧到来前 CSS 底图也要对齐');
+    context.renderer=null;vm.runInNewContext('syncBackdrop();',context);
     for(const key of ['width','height','transform','transformOrigin','backgroundSize'])assert.equal(bed.style[key],'');
   }
 });
@@ -210,4 +258,29 @@ test('植物网格弯曲保留根部，绑定水面斜率且连续动画不重�
   }
   assert.ok(calls.some(c=>c[0]==='uniform1i'&&c[1]==='uPlantSurface'&&c[2]===3));
   assert.equal(calls.filter(c=>c[0]==='texImage2D'||c[0]==='texSubImage2D'||c[0]==='createTexture').length,0);
+});
+
+test('手机与动态壁纸：换季只保留当前一季的底图纹理，切回时按需重新上传',()=>{
+  const {r,calls,image,mask}=renderer();r.resize(1280,720,2,'high');
+  const summer={width:2560,height:1440},summerMask={width:1280,height:720};
+  r.prepareBackground(summer,summerMask);
+  calls.length=0;
+  r.setBackground(summer,summerMask,true);
+  assert.equal(calls.filter(c=>c[0]==='texImage2D').length,0,'已上传的一季直接复用');
+  assert.equal(calls.filter(c=>c[0]==='deleteTexture').length,2,'上一季的底图与遮罩纹理被释放');
+  calls.length=0;
+  r.prepareBackground(image,mask);
+  assert.equal(calls.filter(c=>c[0]==='texImage2D').length,2,'切回上一季时重新上传');
+  // 桌面浏览器不受影响：不带 keepOnly 的切换仍保留四季纹理，秒切不重传。
+  calls.length=0;r.setBackground(image,mask);
+  assert.equal(calls.filter(c=>c[0]==='deleteTexture').length,0);
+});
+
+test('手机与动态壁纸不预上传四季底图，桌面仍按空闲预热；池塘画布的触摸不落到页面手势',()=>{
+  const app=fs.readFileSync(require.resolve('../app.js'),'utf8');
+  assert.match(app,/const lightBackdrops=wallpaperMode\|\|cornerMode\|\|matchMedia\('\(pointer: coarse\)'\)\.matches/);
+  assert.match(app,/function warmBackgrounds\(\)\{\s*if\(lightBackdrops\|\|panelMode\)return;/);
+  assert.match(app,/setBackground\(image,backgroundMask\(season,image\),lightBackdrops\)/);
+  const css=fs.readFileSync(require.resolve('../style.css'),'utf8');
+  assert.match(css,/#world\{touch-action:none(;|\})/);
 });

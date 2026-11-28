@@ -1,31 +1,35 @@
 #!/bin/zsh
-# 摸鱼 · build the Android live-wallpaper APK into android/build/摸鱼.apk (copied to dist/ as well)
+# MoYu · build the Android live-wallpaper APK into android/build/MoYu.apk (copied to dist/ as well)
 # Requires a one-time toolchain under ~/android-build (override with ANDROID_BUILD env):
 #   dl/jdk.tar.gz        Temurin JDK 17 (macOS aarch64)   → jdk/
 #   dl/build-tools.zip   https://dl.google.com/android/repository/build-tools_r34-macosx.zip → bt/
 #   dl/platform-34.zip   https://dl.google.com/android/repository/platform-34-ext7_r03.zip   → plat/
-# Also needs python3 with Pillow (scripts/prepare-mobile.py shrinks the 8K beds for the phone).
+# Also needs Node.js and Python with Pillow (the 4K beds are scaled to 2560×1440 for the APK).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK_ROOT="${ANDROID_BUILD:-$HOME/android-build}"
 JAVA_HOME="$SDK_ROOT/jdk/Contents/Home"
 BT="$SDK_ROOT/bt/android-14"
 AJ="$SDK_ROOT/plat/android-34/android.jar"
-VERSION_NAME="1.2.7"
-VERSION_CODE=7
+VERSION_NAME="1.2.8"
+VERSION_CODE=8
 export PATH="$JAVA_HOME/bin:$PATH"
 cd "$ROOT/android"
+
+# Refresh the shared 4K PNGs and offline data before copying any Android assets.
+node "$ROOT/scripts/embed.mjs"
 
 # Package the current pond, never a stale copy: assets/ is rebuilt from the web sources every time.
 rm -rf assets && mkdir -p assets/assets
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do cp "$ROOT/$f" assets/; done
-# The phone gets 2560×1440 beds: the 8K ones are 169 MB of embedded base64 and 132 MB per decoded
-# bitmap, which overruns a phone's WebView and GPU (most cap textures at 4096) — see prepare-mobile.py.
+# Android gets 2560×1440 beds (scripts/prepare-mobile.py): the phone never needs 4K detail, and
+# the 4K copy would add ~60 MB of embedded base64 plus ~45 MB of stills to the APK.
 PYTHON="${PYTHON:-$(command -v python3)}"
 "$PYTHON" "$ROOT/scripts/prepare-mobile.py"
-cp "$ROOT"/build/mobile/stills/pond*.png "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/favicon.svg" assets/assets/
+cp "$ROOT"/build/mobile/stills/pond*.png "$ROOT"/assets/pond-*-thumb.jpg "$ROOT/assets/pond-data.js" "$ROOT/assets/audio-data.js" "$ROOT/assets/lotus-original.png" "$ROOT/assets/favicon.svg" assets/assets/
 cp "$ROOT/build/mobile/pond-bed.js" assets/assets/pond-bed.js
-cp -R "$ROOT/assets/audio" assets/assets/
+# The recordings already live inside audio-data.js; ship the attribution only, not the three wavs.
+mkdir -p assets/assets/audio && cp "$ROOT/assets/audio/SOURCES.md" assets/assets/audio/
 
 # Keep the signing key between builds, so a new APK installs over the old one without losing the pond.
 [[ -f build/bichi.keystore ]] && cp build/bichi.keystore "$ROOT/android/.bichi.keystore.keep"
@@ -45,7 +49,7 @@ if [[ ! -f build/bichi.keystore ]]; then
     -validity 10000 -storepass bichipond -keypass bichipond -dname "CN=Bichi Koi Pond" 2>/dev/null
 fi
 "$BT/apksigner" sign --ks build/bichi.keystore --ks-pass pass:bichipond --key-pass pass:bichipond \
-  --out "build/摸鱼.apk" build/aligned.apk
-"$BT/apksigner" verify "build/摸鱼.apk"
-mkdir -p "$ROOT/dist" && cp "build/摸鱼.apk" "$ROOT/dist/摸鱼.apk"
-echo "✓ build/摸鱼.apk ($(du -h "build/摸鱼.apk" | cut -f1)), also at dist/摸鱼.apk — transfer to a phone and install"
+  --out "build/MoYu.apk" build/aligned.apk
+"$BT/apksigner" verify "build/MoYu.apk"
+mkdir -p "$ROOT/dist" && cp "build/MoYu.apk" "$ROOT/dist/MoYu.apk"
+echo "✓ build/MoYu.apk ($(du -h "build/MoYu.apk" | cut -f1)), also at dist/MoYu.apk — transfer to a phone and install"

@@ -78,6 +78,29 @@ function pond(seed = 7) {
 }
 const base = { turtles: false, butterflies: false, night: false, rainAmount: .9, snowAmount: .5 };
 
+test('月下观鱼：月亮倒影沿池塘横向移动，真实夜晚按夜程、手动夜晚缓慢往返', () => {
+  const scene = pond();
+  const w = 1672, y0 = scene.moonAt[1];
+  scene.look.moon = 1;
+  // A real night (sunset → sunrise): the reflection walks east → west, clamped at both banks.
+  scene.setNightWindow(1000, 1000 + 12 * 3600e3);
+  scene.updateMoonPath(1000); const a = scene.moonAt[0];
+  scene.updateMoonPath(1000 + 6 * 3600e3); const b = scene.moonAt[0];
+  scene.updateMoonPath(1000 + 12 * 3600e3); const c = scene.moonAt[0];
+  assert.ok(a < b && b < c, '倒影随时间从东向西横穿');
+  assert.ok(Math.abs(a - w * .2) < 1e-6 && Math.abs(c - w * .8) < 1e-6, '夜程两端贴住两岸');
+  assert.equal(scene.moonAt[1], y0, '只横向移动，不漂离原来的倒影高度');
+  scene.updateMoonPath(0); assert.ok(Math.abs(scene.moonAt[0] - w * .2) < 1e-6, '日落前停在东岸');
+  scene.updateMoonPath(1e12); assert.ok(Math.abs(scene.moonAt[0] - w * .8) < 1e-6, '日出后停在西岸');
+  assert.ok(scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]), '放河灯的位置跟着倒影走');
+  // Manual 月下观鱼 (no sunrise data): a slow 24-minute round trip, easing at the banks.
+  scene.setNightWindow(null);
+  scene.updateMoonPath(0); const p = scene.moonAt[0];
+  scene.updateMoonPath(12 * 60 * 1000); const q = scene.moonAt[0];
+  assert.ok(q > p && Math.abs(q - p - w * .6) < 1e-6, '没有夜程时仍横穿整片池塘');
+  assert.ok(scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]));
+});
+
 test('每种天气与夜色的画面参数键一致，天气切换可平滑过渡', () => {
   const keys = Object.keys(lookFor('sunny', false)).sort();
   for (const w of ['sunny', 'cloudy', 'rain', 'snow']) for (const night of [false, true]) assert.deepEqual(Object.keys(lookFor(w, night)).sort(), keys);

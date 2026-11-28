@@ -944,7 +944,8 @@
     }
     return sprites;
   }
-  function miscSprites() {
+  function miscSprites(previewOnly = false) {
+    if (previewOnly) return { fin: finSprite(4, false), finMoto: finSprite(4, true) };
     const s = { fin: finSprite(4, false), finMoto: finSprite(4, true), pellet: pelletSprite(), dot: dotSprite(), flake: flakeSprite(), streak: streakSprite(), ring: ringSprite(), petal: petalSprite() };
     Object.assign(s, { lotusLeaf: lotusLeafSprite(), lotusYellowLeaf: lotusLeafSprite('yellow'), lotusDryLeaf: lotusLeafSprite('dry'), lotusFlower: lotusFlowerSprite(), lotusBud: lotusFlowerSprite(true), lotusPod: lotusPodSprite(), lotusDryPod: lotusPodSprite(true), lotusStem: lotusStemSprite(), lantern: lanternSprite(), leafWater: leafWaterSprite() });
     for (let v = 0; v < TURTLES.length; v++) { const t = turtleSprites(v); for (const k in t) s[`turtle${v}_${k}`] = t[k]; }

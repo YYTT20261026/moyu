@@ -1,15 +1,15 @@
 #!/bin/zsh
-# 碧池观鱼 · build the Windows desktop-wallpaper app into dist/碧池观鱼-Windows-<version>.zip.
+# MoYu · build the Windows desktop-wallpaper app into dist/MoYu-Windows-<version>.zip.
 # Needs the .NET SDK (8 or later; builds on macOS/Linux too): https://dot.net — or set DOTNET to its path.
 # The app targets .NET Framework 4.8 and WebView2, both already part of Windows 10/11, so nothing else is installed.
 set -euo pipefail
 setopt null_glob
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOTNET="${DOTNET:-$(command -v dotnet || echo "$HOME/.dotnet/dotnet")}"
-VERSION="1.2.7"
+VERSION="1.2.8"
 PROJ="$ROOT/native/windows"
 OUT="$ROOT/build/windows/BichiPond"
-ZIP="$ROOT/dist/摸鱼-Windows-$VERSION.zip"
+ZIP="$ROOT/dist/MoYu-Windows-$VERSION.zip"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -31,6 +31,9 @@ for s, data in zip(sizes, pngs):
 open(out, "wb").write(head + entries + b"".join(pngs))
 PY
 
+echo "▸ Refreshing shared 4K artwork and audio…"
+node "$ROOT/scripts/embed.mjs"
+
 echo "▸ Building (.NET Framework 4.8 + WebView2)…"
 # The installer project lives inside this folder and its bin\ holds .NET 8 reference assemblies; MSBuild's
 # assembly search would pick them up as the net48 framework and the app would not compile.
@@ -42,7 +45,7 @@ rm -f "$OUT"/*.pdb "$OUT"/*.xml
 [[ -d "$OUT/runtimes" ]] && find "$OUT/runtimes" -mindepth 1 -maxdepth 1 ! -name 'win-x64' ! -name 'win-x86' ! -name 'win-arm64' -exec rm -rf {} +
 
 cat > "$OUT/README.txt" <<'TXT'
-摸鱼 · Windows 桌面动态壁纸
+MoYu · Windows 桌面动态壁纸
 
 使用：解压整个文件夹（不要只拿出 exe），双击 BichiPond.exe，池塘即铺满每块屏幕的桌面背景，
 位于桌面图标之下，不影响正常使用桌面。

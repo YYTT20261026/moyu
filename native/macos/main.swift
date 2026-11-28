@@ -1,4 +1,4 @@
-// 碧池观鱼 · macOS 桌面动态壁纸
+// MoYu · macOS 桌面动态壁纸
 // Borderless windows one level above the desktop picture (below the icons) render the pond
 // on every space of every screen; a transparent window above the desktop icons passes clicks on the
 // pond's own controls through to it. A menu-bar item controls the app, and a normal window
@@ -45,12 +45,14 @@ final class ClickCatcher: NSView {
 
 // One screen's wallpaper: the pond page, the click catcher above the desktop icons, and what the page reports.
 final class Pane {
-  let window: WallpaperWindow, webView: WKWebView, overlay: NSWindow, catcher: ClickCatcher, screen: NSScreen
+  let window: WallpaperWindow, webView: WKWebView, overlay: NSWindow, catcher: ClickCatcher
+  // Screen coordinates. "shared" gives one pane the union of every screen instead of a single NSScreen.
+  let frame: NSRect
   var rects: [CGRect] = []  // the pond's controls, in screen coordinates
   var hot = false  // cursor over a control: the catcher takes the mouse
   var modal = false  // a panel is open: the whole wallpaper is lifted above the icons and takes the keyboard
-  init(window: WallpaperWindow, webView: WKWebView, overlay: NSWindow, catcher: ClickCatcher, screen: NSScreen) {
-    self.window = window; self.webView = webView; self.overlay = overlay; self.catcher = catcher; self.screen = screen
+  init(window: WallpaperWindow, webView: WKWebView, overlay: NSWindow, catcher: ClickCatcher, frame: NSRect) {
+    self.window = window; self.webView = webView; self.overlay = overlay; self.catcher = catcher; self.frame = frame
   }
 }
 
@@ -75,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem?
   private var refresh: Timer?
   private var screenSignature = ""
+  // "single" = one pond on the menu-bar screen, "multi" = one per screen, "shared" = one across all screens.
+  private var screenMode = UserDefaults.standard.string(forKey: "MoYuScreenMode") ?? "single"
   private var rebuildWork: DispatchWorkItem?
   private var userPaused = false
   private var screensAsleep = false
@@ -120,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self?.applyPause()
       }
     }
-    NSLog("碧池观鱼 wallpaper ready on %d screen(s)", NSScreen.screens.count)
+    NSLog("MoYu wallpaper ready on %d screen(s)", NSScreen.screens.count)
     if let folder = ProcessInfo.processInfo.environment["BICHI_SELFTEST"] { runSelfTest(folder: folder) }
   }
 
@@ -144,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let self = self, let pane = pane, error == nil, let info = result as? [String: Any] else { return }
         // JS numbers arrive as NSNumber; casting straight to [[CGFloat]] silently fails.
         let rows = info["r"] as? [[NSNumber]] ?? []
-        let f = pane.screen.frame
+        let f = pane.frame
         // Page top-left == screen top-left in global coords (y grows upward from the bottom).
         pane.rects = rows.compactMap { r in
           guard r.count == 4 else { return nil }
@@ -180,19 +184,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   // observes it without consuming it, so Finder and the foreground application keep their normal click;
   // the pond receives the same point as a tap and decides whether it is water, a rock, or the bank.
   private func handleDesktopClick(at mouse: NSPoint) {
-    guard settingsWindow == nil else { return }
     // The monitor also sees clicks inside other applications. Only Finder's desktop is a
     // wallpaper surface; never turn a click in Chrome, an editor, or another app into fish food.
     guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
-    for pane in wallpaper where pane.screen.frame.contains(mouse) && !pane.modal {
+    // Finder being in front says nothing about the click: its folder windows (and the pond's own
+    // interactive window) lie over the wallpaper too. Only an uncovered strip of the desktop is a tap.
+    guard !windowCovers(mouse) else { return }
+    for pane in wallpaper where pane.frame.contains(mouse) && !pane.modal {
       if pane.rects.contains(where: { $0.contains(mouse) }) { return }
-      let frame = pane.screen.frame
+      let frame = pane.frame
       let x = mouse.x - frame.minX, y = frame.maxY - mouse.y
       pane.webView.callAsyncJavaScript(
         "window.pondTap && pondTap(x, y)", arguments: ["x": x, "y": y], in: nil, in: .page,
         completionHandler: nil)
       return
     }
+  }
+
+  /// True when a window lies under this screen point, so the click belongs to that window and not to the
+  /// desktop. The desktop picture and icons (below the normal window level) and the pond's own wallpaper and
+  /// click catcher are left out: they are the wallpaper itself, not something covering it.
+  private func windowCovers(_ point: NSPoint) -> Bool {
+    guard let top = NSScreen.screens.first?.frame.maxY,
+      let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+    else { return false }
+    guard let list = windows as? [[String: Any]] else { return false }
+    // CGWindow bounds measure from the top-left of the main screen, AppKit points from its bottom-left.
+    let p = CGPoint(x: point.x, y: top - point.y)
+    let ours = Set(wallpaper.flatMap { [$0.window.windowNumber, $0.overlay.windowNumber] })
+    for info in list {
+      if ours.contains((info[kCGWindowNumber as String] as? NSNumber)?.intValue ?? -1) { continue }
+      guard ((info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1) >= 0 else { continue }
+      guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+        let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+      else { continue }
+      if rect.contains(p) { return true }
+    }
+    return false
   }
 
   // While a panel is open the wallpaper is lifted above the desktop icons and made key, so every field,
@@ -248,8 +276,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     wallpaper.removeAll()
     // BICHI_DEBUG_LEVEL=1 floats the wallpaper above normal apps, for looking at it on a cluttered desktop.
     let debug = ProcessInfo.processInfo.environment["BICHI_DEBUG_LEVEL"] == "1"
-    for screen in NSScreen.screens {
-      let window = WallpaperWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    // One pond on the menu-bar screen, one per screen, or one continuous pond across every display.
+    let screens = NSScreen.screens
+    var targets: [(frame: NSRect, dock: CGFloat)] = []
+    switch screenMode {
+    case "single":
+      if let first = screens.first { targets = [(frame: first.frame, dock: dockInset(for: first))] }
+    case "shared":
+      if let first = screens.first {
+        let union = screens.dropFirst().reduce(first.frame) { $0.union($1.frame) }
+        targets = [(frame: union, dock: 0)]
+      }
+    default:
+      targets = screens.map { (frame: $0.frame, dock: dockInset(for: $0)) }
+    }
+    for target in targets {
+      let window = WallpaperWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
       window.isReleasedWhenClosed = false
       window.level = debug ? .floating : Self.wallpaperLevel
       window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -257,12 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       window.backgroundColor = .black
       window.hasShadow = false
       window.ignoresMouseEvents = true
-      window.title = "摸鱼 Wallpaper"
-      let view = newWebView(dockInset: dockInset(for: screen))
+      window.title = "MoYu Wallpaper"
+      let view = newWebView(dockInset: target.dock)
       window.contentView = view
       window.orderFrontRegardless()
 
-      let overlay = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      let overlay = NSWindow(contentRect: target.frame, styleMask: [.borderless], backing: .buffered, defer: false)
       overlay.isReleasedWhenClosed = false
       overlay.level = debug ? NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1) : Self.aboveDesktop
       overlay.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -272,15 +314,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       overlay.hasShadow = false
       overlay.ignoresMouseEvents = true
       overlay.acceptsMouseMovedEvents = true
-      overlay.title = "摸鱼 Controls"
-      let catcher = ClickCatcher(frame: NSRect(origin: .zero, size: screen.frame.size))
+      overlay.title = "MoYu Controls"
+      let catcher = ClickCatcher(frame: NSRect(origin: .zero, size: target.frame.size))
       catcher.target = view
       catcher.onRelease = { [weak self] in
         for delay in [0.08, 0.3] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { self?.refreshRects() } }
       }
       overlay.contentView = catcher
       overlay.orderFrontRegardless()
-      wallpaper.append(Pane(window: window, webView: view, overlay: overlay, catcher: catcher, screen: screen))
+      wallpaper.append(Pane(window: window, webView: view, overlay: overlay, catcher: catcher, frame: target.frame))
     }
     refresh = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
       self?.refreshRects()
@@ -343,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let main = NSMenu()
     let appItem = NSMenuItem()
     let appMenu = NSMenu()
-    appMenu.addItem(withTitle: "退出摸鱼", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    appMenu.addItem(withTitle: "退出 MoYu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     appItem.submenu = appMenu
     main.addItem(appItem)
     let editItem = NSMenuItem()
@@ -373,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     item.button?.title = "🐟"
     let menu = NSMenu()
     menu.delegate = self
-    let title = NSMenuItem(title: "摸鱼", action: nil, keyEquivalent: "")
+    let title = NSMenuItem(title: "MoYu", action: nil, keyEquivalent: "")
     title.isEnabled = false
     menu.addItem(title)
     menu.addItem(.separator())
@@ -413,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       menu.addItem(login)
     }
     menu.addItem(.separator())
-    menu.addItem(menuItem("退出摸鱼", #selector(quitApp), "q"))
+    menu.addItem(menuItem("退出 MoYu", #selector(quitApp), "q"))
     item.menu = menu
     statusItem = item
   }
@@ -465,7 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     } catch {
       let alert = NSAlert()
       alert.messageText = "无法更改登录项"
-      alert.informativeText = "请在“系统设置 › 通用 › 登录项”中手动添加摸鱼。\n\(error.localizedDescription)"
+      alert.informativeText = "请在“系统设置 › 通用 › 登录项”中手动添加 MoYu。\n\(error.localizedDescription)"
       alert.runModal()
     }
   }
@@ -482,7 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
-      window.title = "摸鱼"
+      window.title = "MoYu"
     window.minSize = NSSize(width: 420, height: 560)
     window.delegate = self
     window.center()
@@ -515,6 +557,12 @@ extension AppDelegate: WKScriptMessageHandler {
       if let s = settings["season"] as? String { season = s }
       if let w = settings["weather"] as? String { weather = w }
       if let n = settings["night"] as? Bool { night = n }
+      if let mode = settings["screenMode"] as? String, ["single", "multi", "shared"].contains(mode), mode != screenMode {
+        screenMode = mode
+        UserDefaults.standard.set(mode, forKey: "MoYuScreenMode")
+        // Rebuild after the message handler returns: it closes the panes, including the sender.
+        DispatchQueue.main.async { [weak self] in self?.rebuildWallpaper() }
+      }
     }
   }
 }
@@ -580,10 +628,11 @@ extension AppDelegate {
     let at = { (delay: Double, step: @escaping () -> Void) in steps.append((delay, step)) }
 
     at(6) {
-      check(self.wallpaper.count == NSScreen.screens.count, "one wallpaper window per screen (\(self.wallpaper.count))")
+      let expectedPanes = self.screenMode == "multi" ? NSScreen.screens.count : 1
+      check(self.wallpaper.count == expectedPanes, "wallpaper windows match the screen mode (\(self.wallpaper.count))")
       for (i, entry) in self.wallpaper.enumerated() {
         check(entry.window.level.rawValue == Int(CGWindowLevelForKey(.desktopWindow)) + 1, "wallpaper \(i) sits on the desktop level")
-        check(entry.window.frame == entry.screen.frame, "wallpaper \(i) covers its screen")
+        check(entry.window.frame == entry.frame, "wallpaper \(i) covers its screen")
         self.js(entry.webView, probe) { s in
           if i == 0 {
             original = s
@@ -605,7 +654,7 @@ extension AppDelegate {
     func center(_ selector: String, _ done: @escaping (NSPoint) -> Void) {
       let pane = self.wallpaper[0]
       self.js(pane.webView, "const b = document.querySelector('\(selector)').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }") { s in
-        let f = pane.screen.frame
+        let f = pane.frame
         done(NSPoint(x: f.minX + CGFloat(s["x"] as? Double ?? 0), y: f.maxY - CGFloat(s["y"] as? Double ?? 0)))
       }
     }
@@ -628,7 +677,7 @@ extension AppDelegate {
       center("#feed-button") { p in
         self.pumpMouse(at: p)
         check(!pane.overlay.ignoresMouseEvents, "a control under the cursor takes the click")
-        self.pumpMouse(at: NSPoint(x: pane.screen.frame.midX, y: pane.screen.frame.midY))
+        self.pumpMouse(at: NSPoint(x: pane.frame.midX, y: pane.frame.midY))
         check(pane.overlay.ignoresMouseEvents, "open water lets clicks through to the desktop")
         click(at: p)
       }

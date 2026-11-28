@@ -1,8 +1,8 @@
 {
   "name": "bichi-koi-pond",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "private": true,
-  "description": "摸鱼 · 可交互的锦鲤池塘动态壁纸",
+  "description": "MoYu · 可交互的锦鲤池塘动态壁纸",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",

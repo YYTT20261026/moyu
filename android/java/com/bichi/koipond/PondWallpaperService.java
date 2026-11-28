@@ -1,12 +1,12 @@
-// 碧池观鱼 · the pond as the phone's live wallpaper, behind the home screen (and the lock screen, where the system allows).
+// MoYu · the pond as the phone's live wallpaper, behind the home screen (and the lock screen, where the system allows).
 // A WallpaperService only hands us a Surface, and a WebView cannot draw into one directly. The pond page runs in a
 // Presentation window on a private virtual display, rendered by the GPU (WebGL and all).
 //
 // On Android 10 and later the virtual display renders into an ImageReader, and the engine copies each finished frame
 // onto the wallpaper with lockHardwareCanvas — the ordinary way a wallpaper draws itself, which every phone supports.
 // Letting the virtual display write straight into the wallpaper's surface works on stock Android but leaves it black on
-// some manufacturers' systems. If no frame ever arrives (or the window cannot be shown), the wallpaper shows the pond
-// painting instead of black, and says why in the app's settings.
+// some manufacturers' systems. Show the bundled painting immediately and keep it until the WebView reports that
+// a real pond frame is ready. If the window cannot be shown, keep the painting and log why.
 package com.bichi.koipond;
 
 import android.app.Presentation;
@@ -68,10 +68,12 @@ public class PondWallpaperService extends WallpaperService {
         private boolean visible;
         private int width, height;
         // Frame bridge (Android 10+): the virtual display renders here, a worker thread copies frames to the wallpaper.
-        private ImageReader reader;
+        private volatile ImageReader reader;
         private HandlerThread copier;
+        private final Object drawLock = new Object();
         private volatile SurfaceHolder target;
-        private volatile boolean firstFrame, stillShown;
+        private volatile boolean pondFrameReady, firstFrame, stillShown;
+        private Bitmap still;
         private long frames;
         private final Paint copyPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
         // Tap detection from raw touches, for launchers that do not report taps on empty space themselves.
@@ -95,7 +97,11 @@ public class PondWallpaperService extends WallpaperService {
                 boolean bridge = Build.VERSION.SDK_INT >= 29 && !"1".equals(sysProp("debug.bichi.direct"));
                 if (display == null) {
                     Surface out;
-                    if (bridge) { startBridge(w, h); out = reader.getSurface(); } else out = holder.getSurface();
+                    if (bridge) {
+                        drawStill(); // Show the painting before WebView allocates its first frame.
+                        startBridge(w, h);
+                        out = reader.getSurface();
+                    } else out = holder.getSurface();
                     DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
                     // No public flag: the display is private to this app, so its Presentation needs no special permission.
                     display = dm.createVirtualDisplay("BichiPondWallpaper", w, h, dpi, out, 0);
@@ -108,10 +114,14 @@ public class PondWallpaperService extends WallpaperService {
                     presentation.show();
                     attachWeb();
                     setStatus(PondWallpaperService.this, (bridge ? "starting (frame bridge) " : "starting (direct) ") + w + "×" + h + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · " + PondWeb.assetSummary(PondWallpaperService.this));
-                    // If the pond has not produced a single frame after a while, show the painting rather than black.
-                    main.postDelayed(() -> { if (bridge && !firstFrame && display != null) showStill("no frames from the pond window after 10 s"); }, 10_000);
+                    if (bridge) scheduleStillStatus();
                 } else if (resized) {
-                    if (bridge && reader != null) { stopBridge(); startBridge(w, h); display.setSurface(reader.getSurface()); }
+                    if (bridge && reader != null) {
+                        stopBridge();
+                        if (stillShown) drawStill();
+                        startBridge(w, h);
+                        display.setSurface(reader.getSurface());
+                    }
                     else if (!bridge) display.setSurface(holder.getSurface());
                     display.resize(w, h, dpi);
                 }
@@ -133,8 +143,19 @@ public class PondWallpaperService extends WallpaperService {
         }
 
         private void stopBridge() {
+            ImageReader old = reader;
+            reader = null;
             if (copier != null) { copier.quitSafely(); try { copier.join(500); } catch (InterruptedException ignored) { } copier = null; }
-            if (reader != null) { reader.close(); reader = null; }
+            if (old != null) old.close();
+        }
+
+        private void scheduleStillStatus() {
+            WebView starting = web;
+            main.postDelayed(() -> {
+                if (web == starting && reader != null && !firstFrame) {
+                    setStatus(PondWallpaperService.this, "still painting shown — no rendered pond frame after 10 s");
+                }
+            }, 10_000);
         }
 
         // Runs on the copier thread for every frame the pond renders.
@@ -143,19 +164,25 @@ public class PondWallpaperService extends WallpaperService {
             try { image = r.acquireLatestImage(); } catch (IllegalStateException e) { return; }
             if (image == null) return;
             try {
-                SurfaceHolder holder = target;
-                HardwareBuffer buffer = Build.VERSION.SDK_INT >= 29 ? image.getHardwareBuffer() : null;
-                if (holder == null || buffer == null) return;
-                Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB));
-                buffer.close();
-                if (bitmap == null) return;
-                Canvas canvas = holder.lockHardwareCanvas();
-                if (canvas == null) return;
-                try { canvas.drawBitmap(bitmap, 0, 0, copyPaint); } finally { holder.unlockCanvasAndPost(canvas); }
-                frames++;
-                if (!firstFrame) {
-                    firstFrame = true; stillShown = false;
-                    setStatus(PondWallpaperService.this, "running · " + width + "×" + height + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · " + PondWeb.assetSummary(PondWallpaperService.this));
+                synchronized (drawLock) {
+                    SurfaceHolder holder = target;
+                    // A Presentation can output solid-colour frames before the WebView has drawn the pond.
+                    if (!pondFrameReady || holder == null || r != reader) return;
+                    Bitmap bitmap;
+                    try (HardwareBuffer buffer = image.getHardwareBuffer()) {
+                        if (buffer == null) return;
+                        bitmap = Bitmap.wrapHardwareBuffer(buffer, ColorSpace.get(ColorSpace.Named.SRGB));
+                    }
+                    if (bitmap == null) return;
+                    Canvas canvas = holder.lockHardwareCanvas();
+                    if (canvas == null) return;
+                    try { canvas.drawBitmap(bitmap, 0, 0, copyPaint); } finally { holder.unlockCanvasAndPost(canvas); }
+                    frames++;
+                    stillShown = false;
+                    if (!firstFrame) {
+                        firstFrame = true;
+                        setStatus(PondWallpaperService.this, "running · " + width + "×" + height + " · Android " + Build.VERSION.RELEASE + " · " + Build.MANUFACTURER + " " + Build.MODEL + " · " + PondWeb.assetSummary(PondWallpaperService.this));
+                    }
                 }
             } catch (RuntimeException e) {
                 Log.w(TAG, "frame copy failed", e);
@@ -189,7 +216,8 @@ public class PondWallpaperService extends WallpaperService {
         private void drawStill() {
             SurfaceHolder holder = target;
             if (holder == null || width == 0) return;
-            Bitmap pond = decodeStill();
+            if (still == null) still = decodeStill();
+            Bitmap pond = still;
             if (pond == null) return;
             // Fitted like the live pond: cover the screen, turned a quarter on a portrait screen so the lotus shows.
             boolean turn = height > width * 1.15f;
@@ -200,17 +228,19 @@ public class PondWallpaperService extends WallpaperService {
             if (turn) m.postRotate(90);
             m.postScale(k, k);
             m.postTranslate(width / 2f, height / 2f);
-            Canvas canvas = null;
-            try {
-                canvas = Build.VERSION.SDK_INT >= 26 ? holder.lockHardwareCanvas() : holder.lockCanvas();
-                if (canvas == null) return;
-                canvas.drawColor(PondWeb.POND);
-                canvas.drawBitmap(pond, m, copyPaint);
-            } catch (RuntimeException e) {
-                Log.w(TAG, "still painting failed", e);
-            } finally {
-                if (canvas != null) holder.unlockCanvasAndPost(canvas);
-                pond.recycle();
+            synchronized (drawLock) {
+                if (firstFrame || holder != target) return;
+                try {
+                    Canvas canvas;
+                    try { canvas = Build.VERSION.SDK_INT >= 26 ? holder.lockHardwareCanvas() : holder.lockCanvas(); }
+                    catch (RuntimeException e) { canvas = holder.lockCanvas(); }
+                    if (canvas == null) return;
+                    try {
+                        canvas.drawColor(PondWeb.POND);
+                        canvas.drawBitmap(pond, m, copyPaint);
+                    } finally { holder.unlockCanvasAndPost(canvas); }
+                    stillShown = true;
+                } catch (RuntimeException e) { Log.w(TAG, "still painting failed", e); }
             }
         }
 
@@ -222,12 +252,17 @@ public class PondWallpaperService extends WallpaperService {
                 // If the system reclaims the renderer, build the pond again rather than leave the wallpaper blank.
                 @Override
                 public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                    synchronized (drawLock) { pondFrameReady = firstFrame = false; }
+                    if (reader != null) drawStill();
                     frame.removeView(view);
                     PondWeb.destroy(view);
                     web = null;
                     attachWeb();
+                    if (reader != null) scheduleStillStatus();
                     return true;
                 }
+            }, view -> {
+                if (view == web) pondFrameReady = true;
             });
             frame.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
@@ -296,7 +331,8 @@ public class PondWallpaperService extends WallpaperService {
             if (display != null) { display.release(); display = null; }
             stopBridge();
             frame = null;
-            firstFrame = false;
+            pondFrameReady = firstFrame = stillShown = false;
+            still = null;
         }
     }
 

@@ -1,4 +1,4 @@
-// 碧池观鱼 · Windows entry point: one copy at a time, then the pond takes the desktop.
+// MoYu · Windows entry point: one copy at a time, then the pond takes the desktop.
 using System;
 using System.Threading;
 using System.Windows.Forms;
@@ -14,7 +14,7 @@ namespace BichiPond
             {
                 if (!first)
                 {
-                    MessageBox.Show("摸鱼已经在运行，可在任务栏通知区域的锦鲤图标中打开或退出。", "摸鱼", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("MoYu 已经在运行，可在任务栏通知区域的锦鲤图标中打开或退出。", "MoYu", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
                 Application.EnableVisualStyles();

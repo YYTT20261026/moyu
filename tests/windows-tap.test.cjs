@@ -9,8 +9,8 @@ const code=p=>read(p).split('\n').filter(l=>!l.trimStart().startsWith('//')).joi
 function pondTap(env){
   const m=code('../app.js').match(/window\.pondTap=\(x,y,controlsOnly\)=>\{[\s\S]*?\n\};/);
   assert.ok(m,'pondTap(x, y, controlsOnly) 还在');
-  return new Function('scene','cardAwake','cornerMode','hostDebug','document','simulation','sound','feedAt','window',
-    'return '+m[0].replace('window.pondTap=',''))(env.scene,()=>{env.awake++;},true,()=>{},env.document,env.simulation,{active:false},()=>env.fed++,env.window);
+  return new Function('scene','cardAwake','cornerMode','document','simulation','sound','feedAt','window',
+    'return '+m[0].replace('window.pondTap=',''))(env.scene,()=>{env.awake++;},true,env.document,env.simulation,{active:false},()=>env.fed++,env.window);
 }
 
 test('透过浮层的轻点落在卡片按钮上：照常请求面板',()=>{

@@ -1,4 +1,4 @@
-// 碧池观鱼 · the windows that show the pond: one wallpaper per screen (inside the desktop, no controls) and the
+// MoYu · the windows that show the pond: one wallpaper per screen (inside the desktop, no controls) and the
 // interactive window with all of the pond's controls. Both are the same web page in WebView2, served from the web\
 // folder beside the exe under https://pond.local, so storage, weather lookups and WebGL work as in a browser.
 using System;
@@ -12,18 +12,6 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace BichiPond
 {
-    // TEMP DIAGNOSTIC (remove once the Windows corner card is confirmed): the page's tap trace lands here,
-    // so a dead card button can be told apart from a click the desktop never passed on.
-    internal static class DebugLog
-    {
-        private static readonly string File = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond", "pond-debug.log");
-        public static void Write(string message)
-        {
-            try { System.IO.File.AppendAllText(File, $"[{DateTime.Now:HH:mm:ss.fff}] {message}\r\n"); } catch { }
-        }
-    }
-
     internal static class PondPage
     {
         public const string Host = "pond.local";
@@ -36,11 +24,12 @@ namespace BichiPond
         /// "corner" keeps its corner card on the desktop. <paramref name="panel"/> opens that panel directly (the
         /// interactive window, reached from the wallpaper's card). <paramref name="safe"/> is the screen's work-area
         /// inset as top/right/bottom/left in CSS px, keeping the card clear of a taskbar docked at a side.</summary>
-        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave, string panel = null, int[] safe = null, bool waitForPanel = false, bool waitForLoad = false, Action<WebView2, CoreWebView2ProcessFailedKind> onProcessFailed = null)
+        public static async Task<WebView2> Create(Control parent, CoreWebView2Environment env, string mode, Action<WebView2, string> onSave, string panel = null, int[] safe = null, bool waitForPanel = false, bool waitForLoad = false, Action<WebView2, CoreWebView2ProcessFailedKind> onProcessFailed = null, Func<WebView2, Task> beforeNavigate = null)
         {
             var view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = mode == "panel" ? Paper : Backdrop };
             parent.Controls.Add(view);
             await view.EnsureCoreWebView2Async(env);
+            if (parent.IsDisposed || parent.Disposing || view.IsDisposed) throw new OperationCanceledException();
             var core = view.CoreWebView2;
             core.SetVirtualHostNameToFolderMapping(Host, WebFolder, CoreWebView2HostResourceAccessKind.Allow);
             core.Settings.AreDefaultContextMenusEnabled = false;
@@ -84,6 +73,9 @@ namespace BichiPond
                 loaded = new TaskCompletionSource<bool>();
                 core.NavigationCompleted += (s, e) => loaded.TrySetResult(e.IsSuccess);
             }
+            // 生命周期订阅和初始文档脚本必须先于第一次导航，不能等 Create 返回才安装。
+            if (beforeNavigate != null) await beforeNavigate(view);
+            if (parent.IsDisposed || parent.Disposing || view.IsDisposed) throw new OperationCanceledException();
             core.Navigate($"https://{Host}/index.html" + query);
             if (loaded != null) await Task.WhenAny(loaded.Task, Task.Delay(8000));
             if (waitForPanel)
@@ -151,11 +143,142 @@ namespace BichiPond
             Bounds = screen;
             BackColor = PondPage.Backdrop;
             AutoScaleMode = AutoScaleMode.None; // sizes are the screen's real pixels, never rescaled
-            Text = "摸鱼 Wallpaper";
+            Text = "MoYu Wallpaper";
         }
 
-        /// <summary>Last pause state sent to the page, so it is only told when that changes.</summary>
-        public bool? Paused { get; set; }
+        /// <summary>宿主期望的暂停状态，独立于当前文档是否已经确认应用。</summary>
+        public bool DesiredPaused { get; private set; } = true;
+        public bool? Paused { get; private set; }
+        private bool pauseLifecycleInstalled, pauseSending, pauseSyncPending, navigationReady;
+        private long navigationGeneration;
+        private ulong navigationId;
+        private bool? documentScriptPaused;
+        private string pauseDocumentScriptId, documentTokenJson;
+
+        private const string PauseDocumentScript = @"(()=>{
+            if(window.top!==window)return;
+            window.__pondDesiredPaused=DESIRED_PAUSED;
+            window.__pondHostDocument=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+            window.addEventListener('pond-ready',()=>{
+                window.chrome.webview.postMessage({pondLifecycle:'ready'});
+            });
+        })();";
+
+        private async Task InstallPauseLifecycle(WebView2 view)
+        {
+            View = view;
+            var core = view.CoreWebView2;
+            core.NavigationStarting += (s, e) =>
+            {
+                // 外部链接已由 PondPage 取消，不应让仍在显示的文档失去确认状态。
+                if (e.Cancel || !Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) || uri.Host != PondPage.Host) return;
+                navigationId = e.NavigationId;
+                navigationGeneration++;
+                navigationReady = false;
+                Paused = null;
+                documentTokenJson = null;
+                RequestPauseSync();
+            };
+            core.NavigationCompleted += (s, e) =>
+            {
+                if (e.NavigationId != navigationId) return;
+                navigationReady = e.IsSuccess;
+                if (navigationReady) RequestPauseSync();
+            };
+            core.WebMessageReceived += (s, e) =>
+            {
+                // 对象消息不会走存档字符串通道；ready 只唤醒同步，脚本仍检查当前文档。
+                if (e.WebMessageAsJson == "{\"pondLifecycle\":\"ready\"}") RequestPauseSync();
+            };
+            await UpdatePauseDocumentScript(core, DesiredPaused);
+            pauseLifecycleInstalled = true;
+        }
+
+        private async Task UpdatePauseDocumentScript(CoreWebView2 core, bool paused)
+        {
+            string id = await core.AddScriptToExecuteOnDocumentCreatedAsync(PauseDocumentScript.Replace("DESIRED_PAUSED", paused ? "true" : "false"));
+            // 先安装新脚本再删除旧脚本，失败时保留至少一份；此注册属于宿主而非某次导航。
+            if (pauseDocumentScriptId != null) core.RemoveScriptToExecuteOnDocumentCreated(pauseDocumentScriptId);
+            pauseDocumentScriptId = id;
+            documentScriptPaused = paused;
+        }
+
+        public void SetPaused(bool paused)
+        {
+            DesiredPaused = paused;
+            RequestPauseSync();
+        }
+
+        private void RequestPauseSync()
+        {
+            if (!pauseLifecycleInstalled || IsDisposed || Disposing) return;
+            pauseSyncPending = true;
+            if (!pauseSending) _ = SynchronizePause();
+        }
+
+        private bool IsCurrentDocument(long generation)
+        {
+            return !IsDisposed && !Disposing && navigationReady && generation == navigationGeneration;
+        }
+
+        private async Task SynchronizePause()
+        {
+            pauseSending = true;
+            try
+            {
+                do
+                {
+                    pauseSyncPending = false;
+                    if (IsDisposed || Disposing || View?.CoreWebView2 == null) return;
+                    var core = View.CoreWebView2;
+                    bool paused = DesiredPaused;
+                    if (documentScriptPaused != paused) await UpdatePauseDocumentScript(core, paused);
+                    long generation = navigationGeneration;
+                    if (!IsCurrentDocument(generation) || Paused == paused) continue;
+                    if (documentTokenJson == null)
+                    {
+                        string token = await core.ExecuteScriptAsync("window.__pondHostDocument||null");
+                        if (!IsCurrentDocument(generation)) continue;
+                        if (token == null || !token.StartsWith("\"")) continue;
+                        documentTokenJson = token;
+                    }
+                    // 文档身份防止旧 ExecuteScript 请求落到重载后的新文档；只有 pause 真正执行才确认。
+                    string script = "(()=>{if(window.__pondHostDocument!==" + documentTokenJson + ")return false;" +
+                        "window.__pondDesiredPaused=" + (paused ? "true" : "false") + ";" +
+                        "if(window.__pondReady!==true||!window.pondControl||typeof window.pondControl.pause!=='function')return false;" +
+                        "window.pondControl.pause(window.__pondDesiredPaused);return true;})()";
+                    string applied = await core.ExecuteScriptAsync(script);
+                    if (IsCurrentDocument(generation) && applied == "true") Paused = paused;
+                    else
+                    {
+                        // A null/异常 answer does not confirm the state and must not spin: leave it to the
+                        // next watch (or the next ready/navigation event) instead of retrying in this loop.
+                        pauseSyncPending = false;
+                        break;
+                    }
+                }
+                while (pauseSyncPending && !IsDisposed && !Disposing);
+            }
+            catch (Exception)
+            {
+                // 不在错误响应后自旋：保留期望状态，由下一次 watch / ready / 导航事件触发重试。
+                pauseSyncPending = false;
+            }
+            finally { pauseSending = false; }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                pauseLifecycleInstalled = false;
+                navigationGeneration++;
+                navigationReady = false;
+                pauseSyncPending = false;
+                Paused = null;
+            }
+            base.Dispose(disposing);
+        }
 
         // Never take focus from whatever the person is using.
         protected override bool ShowWithoutActivation => true;
@@ -178,7 +301,7 @@ namespace BichiPond
                 Math.Max(0, (int)Math.Round((bounds.Bottom - work.Bottom) / k)),
                 Math.Max(0, (int)Math.Round((work.Left - bounds.Left) / k)),
             };
-            View = await PondPage.Create(this, env, "corner", onSave, null, safe, onProcessFailed: onProcessFailed);
+            View = await PondPage.Create(this, env, "corner", onSave, null, safe, onProcessFailed: onProcessFailed, beforeNavigate: InstallPauseLifecycle);
         }
 
         /// <summary>Notes that nobody can see this screen for now. The view is deliberately left visible: hiding
@@ -195,7 +318,6 @@ namespace BichiPond
         /// landed through a window lying over the card: the page offers it to the card's controls and nothing else.</summary>
         public void Tap(Point screenPoint, bool controlsOnly = false)
         {
-            DebugLog.Write($"sending tap to {DeviceName} at {screenPoint.X},{screenPoint.Y}{(controlsOnly ? " (card controls only)" : "")}");
             Send("pondTapDevice", screenPoint, controlsOnly);
         }
 
@@ -221,7 +343,7 @@ namespace BichiPond
 
         public InteractiveForm()
         {
-            Text = "摸鱼";
+            Text = "MoYu";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             BackColor = PondPage.Backdrop;
             StartPosition = FormStartPosition.CenterScreen;

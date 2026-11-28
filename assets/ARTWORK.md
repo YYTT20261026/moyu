@@ -1,9 +1,9 @@
 # 池塘美术来源
 
-- 春季底图：用户提供的鱼池插画，高清原图 `assets/pond.png`（7680×4320）；按用户要求用本地 OpenCV 图像修补减少水面的散落花朵，岸线和石头像素保持原样。
-- 夏、秋、冬底图：用户提供的高清原图 `assets/pond-summer.png`、`pond-autumn.png`、`pond-winter.png`（7680×4320）；由 `scripts/prepare-bed.py` 保存为 8K PNG 运行版 `assets/pond-<季节>-runtime.png`（超过 8K 的源图缩到 8K），保留原图构图。设备纹理上限不足时渲染器会自动缩放上传，采样是归一化的，池中元素不会因此移动。
-- 网页使用 PNG 运行版（`assets/pond-runtime.png` 等）；`file://` 页面（双击打开 HTML、Android、macOS、Wallpaper Engine）额外加载 `assets/pond-bed.js` 读取内嵌底图像素，http(s) 页面则直接用 PNG，`assets/pond-data.js` 只保留荷花与花叶素材。
-- Android APK 内使用 `scripts/prepare-mobile.py` 生成的 2560×1440 底图：手机纹理上限通常只有 4096，8K 底图会带来 169MB 的内嵌脚本与每张约 132MB 的解码位图，WebView 容易内存溢出、壁纸空白。
+- 四季底图来自用户提供的鱼池插画。当前唯一权威资源是 `assets/pond-runtime.png`、`pond-summer-runtime.png`、`pond-autumn-runtime.png`、`pond-winter-runtime.png`，均为 3840×2160 无损 PNG；更高分辨率底图已从项目工作树移除。现有 4K 图片内容和像素保持不变，不调色、不锐化、不修补、不补绘。
+- `scripts/prepare-bed.py` 只验证现有四张 4K PNG 的尺寸、格式与完整性，并生成季节缩略图；不再读取旧原图，也不重编码或覆盖底图。设备纹理上限不足时渲染器仍可缩放上传，归一化采样保证池中元素不会因此移动。
+- 网页使用 PNG 运行版（`assets/pond-runtime.png` 等）；`file://` 页面（双击打开 HTML、macOS、Wallpaper Engine）额外加载 `assets/pond-bed.js` 读取内嵌底图像素（4K JPEG q90），http(s) 页面则直接用 PNG，`assets/pond-data.js` 只保留荷花与花叶素材。Android 使用打包时生成的 2560×1440 内嵌版。
+- Windows、macOS、Web、Wallpaper Engine 的页面使用 3840×2160 无损 PNG；`file://` 页面的内嵌 `pond-bed.js` 以 4K JPEG q90 再编码（约 10MB，替代无损 base64 的约 60MB）。Android 由 `scripts/prepare-mobile.py` 缩到 2560×1440（静图无损 PNG，`file://` 内嵌 JPEG q90），避免 4K 内嵌与每张解码位图约 33MiB 的内存和包体积开销。现有按季加载和设备纹理上限降采样逻辑保持不变。各平台构建入口会通过 `scripts/embed.mjs` 自动验证 4K 权威底图并刷新离线内嵌数据。
 - 天气面板使用 320×180 的 `assets/pond-<季节>-thumb.jpg` 缩略图，避免为预览重复解码完整图片。后台分时准备其他季节的底图与纹理，切换时复用渲染缓冲区。
 - 四季水面的大量独立圆形涟漪按用户要求清理，每张保留两处主要涟漪；用附近平静水面的笔触恢复局部纹理，并保留原有水色和光照。编辑遮罩限定在水域内，保护岸线、石头及漂浮花叶；运行底图、季节缩略图和离线内嵌版本同步更新。动态水波最多接受两处短暂扰动，减弱强度并加快衰减；植物仍响应投喂和雨滴。
 - 四季原画左中偏下有一片偏暗的深水阴影，按用户要求抬亮为与池中央一致的青绿色。抬亮只作用于岸边遮罩内的水域（原图直方图较暗的部分），保留水面纹理、深度层次以及所有水下卵石、岸线和石头像素；逐季生成 `output/pond-<季节>-lifted.jpg` 后回填底图。修改前的原图另存为 `output/pond*.before-lift.jpg`。
@@ -19,4 +19,4 @@
 
 天气面板可选择春、夏、秋、冬。季节切换会更换底图、水域边界、花朵与螃蟹栖息位置，使用对应天气预设；晴雨、雨雪量和夜色仍可单独调整。季节选择随其他池塘设置保存在设备上。
 
-替换底图或改变构图时，请同步更新 `POND_MAPS` 与 `scene.js` 中的季节标注：标注尺度固定为 2560×1440，底图本身可以用 8K；先运行 `python scripts/prepare-bed.py` 生成运行底图，再运行 `npm run build` 生成内嵌图片和静态网页。
+改变底图构图时，请同步更新 `POND_MAPS` 与 `scene.js` 中的季节标注；仅将同一画面缩为 4K 不需要修改标注。标注尺度固定为 2560×1440，运行底图统一为 3840×2160。`npm run build` 或各平台构建脚本会验证现有 4K 底图并生成缩略图和内嵌数据；可用 `PYTHON` 指定带 Pillow 的 Python 解释器。

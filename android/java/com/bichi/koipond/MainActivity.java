@@ -1,4 +1,4 @@
-// 碧池观鱼 · the pond with all its controls, full screen: feeding, naming koi, weather, sound, settings.
+// MoYu · the pond with all its controls, full screen: feeding, naming koi, weather, sound, settings.
 // It is the live wallpaper's settings screen too (see PondWallpaperService); on first launch it offers the
 // system's live-wallpaper preview, so the pond goes straight onto the home screen. Changes made here reach the
 // wallpaper as they are saved.
