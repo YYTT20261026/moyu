@@ -1,0 +1,62 @@
+name: macOS universal build
+
+# Builds the macOS app on GitHub's Intel runner. The local Mac's macOS 27 SDK no longer ships the
+# x86_64 Swift runtime, but the macos-15 image's Xcode 16.4 still does, so both slices can be linked
+# here and lipo'd into a universal .app/.dmg.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the dmg to (leave empty for artifact only)'
+        required: false
+        default: 'v1.2.8'
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Toolchain
+        run: |
+          uname -m
+          xcode-select -p
+          swiftc --version
+          python3 --version
+
+      - name: Install Pillow
+        run: |
+          python3 -m pip install --user pillow || python3 -m pip install --user --break-system-packages pillow
+
+      - name: Build macOS app and dmg
+        run: |
+          chmod +x scripts/build-macos.sh
+          ARCHS="arm64 x86_64" ./scripts/build-macos.sh
+
+      - name: Inspect the result
+        run: |
+          ls -lh dist/*.dmg
+          lipo -archs dist/MoYu.app/Contents/MacOS/BichiPond
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoYu-macOS-${{ github.run_id }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
+      - name: Attach the dmg to the release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          for f in dist/MoYu-*-macOS-*.dmg; do
+            gh release upload "$TAG" "$f" --clobber
+          done

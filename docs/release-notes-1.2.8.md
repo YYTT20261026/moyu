@@ -1,6 +1,6 @@
 # MoYu v1.2.8
 
-> 本次统一更名为 **MoYu**，全平台（Windows / Android / Web / macOS）均已更新到 1.2.8。macOS 版已构建完成并随本次发布提供。
+> 本次统一更名为 **MoYu**，并把 Windows / Android / Web 全部更新到 1.2.8。macOS 通用版（Apple 芯片 + Intel）由 GitHub Actions 的 Intel runner 构建后补传。
 
 ## 更名与升级
 
@@ -41,7 +41,7 @@
 | Windows 安装器 `MoYu-1.2.8.exe` | 49.8 MB |
 | Android `MoYu-1.2.8-Android.apk` | 31.9 MB |
 | Web / Wallpaper Engine `MoYu-1.2.8-Web.zip` | 57.0 MB |
-| macOS（Apple Silicon）`MoYu-1.2.8.dmg` | 58.6 MB |
+| macOS 通用版 | 待 Actions 构建后补传（Apple 芯片 + Intel） |
 
 ## 验证
 
@@ -54,5 +54,4 @@
 - Windows：`MoYu-1.2.8-Windows.zip` / `MoYu-1.2.8.exe`
 - Android：`MoYu-1.2.8-Android.apk`
 - Web / Wallpaper Engine：`MoYu-1.2.8-Web.zip`
-- macOS（Apple Silicon）：`MoYu-1.2.8.dmg`
 - 校验：`SHA256SUMS.txt`

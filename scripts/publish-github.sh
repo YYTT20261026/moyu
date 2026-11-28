@@ -13,12 +13,19 @@ cd "$ROOT"
 
 echo "▸ Collecting the apps…"
 OUT="$ROOT/build/release"; rm -rf "$OUT"; mkdir -p "$OUT"
-# The dmg is built on a Mac. Publishing from Windows/Linux must not fail without it; upload it
-# later with: gh release upload "v$VERSION" "dist/MoYu-$VERSION.dmg" --repo "$REPO" --clobber
-if [ -f "dist/MoYu-$VERSION.dmg" ]; then
+# The dmg is built on a Mac. Publishing from Windows/Linux must not fail without it; build it
+# later on a Mac (or the macOS Actions workflow) and upload the arch-named file.
+found=0
+for dmg in "dist/MoYu-$VERSION-macOS-"*.dmg(N); do
+  cp "$dmg" "$OUT/$(basename "$dmg")"
+  found=1
+done
+if [ "$found" = 0 ] && [ -f "dist/MoYu-$VERSION.dmg" ]; then
   cp "dist/MoYu-$VERSION.dmg" "$OUT/MoYu-$VERSION-macOS.dmg"
-else
-  echo "  (no macOS dmg in dist; skipping — build it on a Mac and upload afterwards)"
+  found=1
+fi
+if [ "$found" = 0 ]; then
+  echo "  (no macOS dmg in dist; build it on a Mac and upload afterwards)"
 fi
 cp "dist/MoYu-Windows-$VERSION.zip" "$OUT/MoYu-$VERSION-Windows.zip"
 cp "dist/MoYu.apk" "$OUT/MoYu-$VERSION-Android.apk"
