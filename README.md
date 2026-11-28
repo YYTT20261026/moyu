@@ -21,7 +21,7 @@ macOS · Windows · Android 动态壁纸，也能在浏览器和 Wallpaper Engin
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| macOS 12+（Apple 芯片 / Intel） | `MoYu-<版本>-macOS-universal.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
+| macOS 12+（Apple 芯片） | `MoYu-<版本>-macOS-arm64.dmg` | 打开后拖进「应用程序」，双击运行，池塘即成为每块屏幕的桌面背景；菜单栏 🐟 控制。首次打开请右键 →「打开」（未经 Apple 公证） |
 | Windows 10 / 11 | `MoYu-<版本>.exe` | 双击即安装到当前用户目录（`%LOCALAPPDATA%\Programs\MoYu`），无需管理员权限；自动创建桌面与开始菜单快捷方式，并提供卸载入口。便携版为 `MoYu-<版本>-Windows.zip`，解压后双击 `BichiPond.exe` |
 | Android 7.0+ | `MoYu-<版本>-Android.apk` | 安装后第一次打开即进入动态壁纸预览，点「设置壁纸」 |
 | 浏览器 / Wallpaper Engine | `MoYu-<版本>-Web.zip` | 解压后打开 `index.html`，或在 Wallpaper Engine 中导入该文件夹 |
@@ -138,14 +138,7 @@ gh auth login              # 首次使用时登录
 ./scripts/build-macos.sh
 ```
 
-生成 `dist/MoYu.app` 和可拖拽安装的 `dist/MoYu-<版本>-macOS-universal.dmg`（当前 1.2.8），支持 macOS 12 及以上（Apple 芯片 / Intel）。默认同时尝试 arm64 与 x86_64，成功则 `lipo` 成通用二进制；当前 macOS 27 SDK 已不带 x86_64 的 Swift 运行库，因此在本机构建会回退为 Apple 芯片版本。要在这台 Mac 上出 Intel 版，用仍带 Intel 运行库的旧 SDK：
-
-```sh
-SDK=/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk \
-ARCHS=x86_64 ./scripts/build-macos.sh
-```
-
-也可以在 GitHub Actions 里手动运行 **macOS universal build**（`macos-15` runner 的 Xcode 16.4 仍带 x86_64 Swift 运行库，能同时链接两个架构），产物会作为 artifact 并自动附加到对应 Release。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
+生成 `dist/MoYu.app` 和可拖拽安装的 `dist/MoYu-<版本>-macOS-arm64.dmg`（当前 1.2.8），支持 macOS 12 及以上的 Apple 芯片机型。应用为临时（ad-hoc）签名，首次打开时需右键 →「打开」。
 
 双击打开后，池塘即铺满每块屏幕的桌面背景层——位于系统壁纸上、桌面图标下，不影响正常使用桌面；多显示器与空间切换均支持。
 

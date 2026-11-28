@@ -14,7 +14,7 @@ cd "$ROOT"
 echo "▸ Collecting the apps…"
 OUT="$ROOT/build/release"; rm -rf "$OUT"; mkdir -p "$OUT"
 # The dmg is built on a Mac. Publishing from Windows/Linux must not fail without it; build it
-# later on a Mac (or the macOS Actions workflow) and upload the arch-named file.
+# later on a Mac and upload the arch-named file.
 found=0
 for dmg in "dist/MoYu-$VERSION-macOS-"*.dmg(N); do
   cp "$dmg" "$OUT/$(basename "$dmg")"

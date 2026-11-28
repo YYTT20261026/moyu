@@ -1,16 +1,11 @@
 #!/bin/zsh
 # MoYu · build the standalone macOS desktop-wallpaper app into dist/MoYu.app,
-# a universal binary (Apple silicon + Intel, macOS 12+), plus a drag-to-install disk image.
+# an Apple-silicon (arm64) binary for macOS 12+, plus a drag-to-install disk image.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/MoYu.app"
 CONTENTS="$APP/Contents"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/native/macos/Info.plist")"
-# Slices to build (space separated). Both give a universal app; ARCHS=x86_64 gives an Intel-only one.
-ARCHS="${ARCHS:-arm64 x86_64}"
-# Point at an older SDK when the installed Xcode no longer carries the Intel Swift runtime, e.g.
-# SDK=/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk
-SDK="${SDK:-}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -22,44 +17,11 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources/assets"
 echo "▸ Refreshing embedded artwork and audio…"
 node "$ROOT/scripts/embed.mjs"
 
-echo "▸ Compiling Swift wrapper…"
-BINARIES=()
-SDK_ARGS=()
-if [ -n "$SDK" ]; then SDK_ARGS=(-sdk "$SDK"); fi
-X86_FAILED=0
-for arch in ${=ARCHS}; do
-  case "$arch" in
-    arm64|x86_64) ;;
-    *) echo "Unknown architecture: $arch (use arm64 and/or x86_64)"; exit 1 ;;
-  esac
-  echo "  · $arch"
-  if swiftc -O -swift-version 5 -module-cache-path "$WORK/module-cache" -target "$arch-apple-macos12.0" "${SDK_ARGS[@]}" -o "$WORK/BichiPond-$arch" "$ROOT/native/macos/main.swift"; then
-    BINARIES+=("$WORK/BichiPond-$arch")
-  else
-    echo "    ($arch slice could not be linked)"
-    if [ "$arch" = "x86_64" ]; then X86_FAILED=1; fi
-  fi
-done
-if [ ${#BINARIES[@]} -eq 0 ]; then
-  if [ "$X86_FAILED" = "1" ]; then
-    echo "  The x86_64 slice needs a macOS SDK that still ships the Intel Swift runtime."
-    echo "  Try an older Xcode, e.g. SDK=<MacOSX15.sdk> ARCHS=x86_64 ./scripts/build-macos.sh"
-  fi
-  exit 1
-fi
-if [ ${#BINARIES[@]} -eq 1 ]; then
-  cp "${BINARIES[1]}" "$CONTENTS/MacOS/BichiPond"
-else
-  lipo -create -output "$CONTENTS/MacOS/BichiPond" "${BINARIES[@]}"
-fi
+echo "▸ Compiling Swift wrapper (arm64)…"
+swiftc -O -swift-version 5 -module-cache-path "$WORK/module-cache" -target "arm64-apple-macos12.0" -o "$CONTENTS/MacOS/BichiPond" "$ROOT/native/macos/main.swift"
 BUILT="$(lipo -archs "$CONTENTS/MacOS/BichiPond")"
-case "$BUILT" in
-  *arm64*x86_64*|*x86_64*arm64*) DMG_LABEL=universal ;;
-  *x86_64*) DMG_LABEL=intel ;;
-  *) DMG_LABEL=arm64 ;;
-esac
-DMG="$ROOT/dist/MoYu-$VERSION-macOS-$DMG_LABEL.dmg"
-echo "  → $BUILT ($DMG_LABEL)"
+DMG="$ROOT/dist/MoYu-$VERSION-macOS-arm64.dmg"
+echo "  → $BUILT"
 
 echo "▸ Bundling web app…"
 cp "$ROOT/native/macos/Info.plist" "$CONTENTS/Info.plist"
