@@ -35,9 +35,13 @@ jobs:
         run: |
           python3 -m pip install --user pillow || python3 -m pip install --user --break-system-packages pillow
 
+      - name: Normalize shell scripts
+        run: |
+          sed -i '' 's/\r$//' scripts/build-macos.sh scripts/publish-github.sh
+          chmod +x scripts/build-macos.sh
+
       - name: Build macOS app and dmg
         run: |
-          chmod +x scripts/build-macos.sh
           ARCHS="arm64 x86_64" ./scripts/build-macos.sh
 
       - name: Inspect the result
