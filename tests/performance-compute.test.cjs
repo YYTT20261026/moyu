@@ -197,6 +197,7 @@ function paletteOf(look, keys) { return Object.fromEntries(keys.map(k => [k, pla
 test('setLook 保留昼夜混色和指数插值公式、晴天清云以及立即设置语义', () => {
   const { PondScene, lookFor } = loadScene(), scene = makeScene(PondScene);
   const keys = Object.keys(lookFor('sunny', false)), direction = scene.look.shadowDir;
+  scene.moonFade = 1;
   for (const weather of ['sunny', 'cloudy', 'rain', 'snow', 'unknown']) {
     for (const nightK of [-1, 0, .45, 1, 2]) {
       const amounts = { rainAmount: .8, snowAmount: .3 };
@@ -215,6 +216,10 @@ test('setLook 保留昼夜混色和指数插值公式、晴天清云以及立即
       assert.equal(scene.look.shadowDir, direction);
     }
   }
+  // 月亮只在水面升起时照亮月色：入夜和天亮的过程按 moonFade 收放同一份夜色。
+  scene.moonFade = .25;
+  scene.setLook('sunny', true, undefined, {}, 1);
+  assert.ok(Math.abs(scene.look.moon - lookFor('sunny', true).moon * .25) < 1e-9, '月亮落下时月光跟着变淡');
 });
 
 test('天气目标按实例和 weather/rain/snow 缓存，昼夜切换复用目标且不改模板', () => {

@@ -4,6 +4,9 @@
   const { PALETTES, fishPalette, BODY, POND_MAPS, PondHabitat, clamp, wrap, fishPose, randomSeed } = root.PondCore;
   const { halfWidth, girthOf } = root.PondArt;
   const TAU = Math.PI * 2;
+  // The moon takes this long to clear the bank at either end of the night, so it appears and
+  // disappears by degrees around sunset and sunrise instead of snapping on and off.
+  const MOON_RISE = 20 * 60 * 1000;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
   const smoothstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   // Retain matching items in place. The update loop runs every frame, and filter() would allocate a new
@@ -619,7 +622,7 @@
       this.look = lookFor('sunny', false); this.look.shadowDir = [.7, .72];
       this.lookTargets = null; this.lookTarget = lookFor('sunny', false); this.depthItems = []; this.driftSample = {};
     // Moon reflection: a fixed east-west path across the pond, walked as the night runs.
-    this.moonAt = [0, 0]; this.moonHome = null; this.nightWindow = null; this.moonDisc = [0, 0, 1, 0];
+    this.moonAt = [0, 0]; this.moonHome = null; this.nightWindow = null; this.moonDisc = [0, 0, 1, 0]; this.moonFade = 0;
       this.pose = new Float32Array((BODY.segments + 1) * 4);
       this.spots = []; this.finTint = PALETTES.map(p => [...rgb(p.fin), .9]);
     }
@@ -804,24 +807,27 @@
     moonLanternSpot(x, y) {
       return !!this.look.moon && Math.hypot(x - this.moonAt[0], y - this.moonAt[1]) < Math.max(90, 130 * this.scale);
     }
-    // The real night (the followed city's sunset → sunrise) walks the reflection from east to west.
-    // 月下观鱼 can also be switched on by hand at any hour: without a night window it drifts on a slow
-    // 24-minute round trip, easing at the banks instead of jumping back.
+    // The night the reflection is walking: the followed city's sunset → sunrise, or — with no city
+    // data, and for a 月下观鱼 switched on by hand — the system clock's own 18:00 → 06:00.
     setNightWindow(start, end) {
       this.nightWindow = Number.isFinite(start) && Number.isFinite(end) && end > start ? [start, end] : null;
     }
+    moonNight(now) {
+      if (this.nightWindow) return this.nightWindow;
+      const day = new Date(now); day.setHours(0, 0, 0, 0);
+      const dawn = day.getTime() + 6 * 3600e3, dusk = day.getTime() + 18 * 3600e3;
+      return now < dawn ? [dusk - 864e5, dawn] : [dusk, dusk + 12 * 3600e3];
+    }
+    // One night, one crossing: the reflection rises out of the east bank as the day ends, is carried
+    // slowly west by the clock through the night, and sinks into the west bank at daybreak. Between
+    // the two nodes — and all day — there is no moon on the water at all, so the pond keeps to the
+    // real evening instead of looping every few minutes.
     updateMoonPath(now = Date.now()) {
       const home = this.moonHome;
       if (!home) return;
-      let t;
-      if (this.nightWindow) {
-        const [start, end] = this.nightWindow;
-        t = (now - start) / (end - start);
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-      } else {
-        const period = 24 * 60 * 1000;
-        t = .5 - .5 * Math.cos(TAU * (((now % period) + period) % period) / period);
-      }
+      const [start, end] = this.moonNight(now);
+      this.moonFade = clamp(Math.min(now - start, end - now) / MOON_RISE, 0, 1);
+      const t = clamp((now - start) / (end - start), 0, 1);
       this.moonAt[0] = this.w * .2 + this.w * .6 * t;
       this.moonAt[1] = home[1];
     }
@@ -1033,6 +1039,8 @@
       // 昼夜目标只读，黄昏混色写入实例自己的临时对象，避免插值污染缓存。
       const target = copyLook(this.lookTarget, targets.day);
       if (nightK > 0) lerpLook(target, targets.night, clamp(nightK, 0, 1));
+      // The moon only lights the water while it is up; the night itself can outlast it.
+      target.moon *= this.moonFade;
       if (dt === undefined) { const dir = this.look.shadowDir; this.look = copyLook({}, target); this.look.shadowDir = dir; }
       else lerpLook(this.look, target, 1 - Math.exp(-dt * 1.1));
       // Clear skies remove the previous weather's clouds immediately; lighting still eases toward sunlight.

@@ -530,11 +530,18 @@ function feedAt(x,y){
   if(fishAt(x,y)){scene.startle(x,y);scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);if(sound.active)sound.tap();return;}
   scene.startle(x,y);if(!feedMode){scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);sound.tap();return;}const before=simulation.food.length;if(simulation.feed(x,y)){scene.drop(x,y,7*scene.scale,.5);for(const p of simulation.food.slice(before))scene.drop(p.x,p.y,3*scene.scale,.22);if(daily.date!==dayKey())daily={date:dayKey(),count:0};daily.count++;updateMeta();scheduleSave();if(sound.active)sound.plop();}else{scene.drop(x,y,10*scene.scale,.55);toast('鱼食还没吃完，让小鱼慢慢享用吧');}}
 // On a moonlit night the hint points at the reflection: a tap there sets a lantern adrift instead.
+// The moon is only up between sunset and sunrise, so the hint waits for it to rise rather than
+// pointing at empty water on a 月下观鱼 opened by hand in the afternoon.
 function updatePondHint(){
   const hint=$('#pond-hint');if(!hint)return;
   const fireflies=settings.night&&settings.season==='summer'&&settings.butterflies&&(settings.weather==='sunny'||settings.weather==='cloudy');
-  hint.textContent=settings.night?(fireflies?'轻点月亮倒影放河灯 · 长按水面点亮萤灯':'轻点月亮倒影，放一盏河灯'):feedMode?'轻点水面，投下一点欢喜':'轻点水面，泛起一圈涟漪';
+  const moonlit=!!(settings.night&&scene&&scene.look.moon>.05);
+  hint.textContent=moonlit?(fireflies?'轻点月亮倒影放河灯 · 长按水面点亮萤灯':'轻点月亮倒影，放一盏河灯'):feedMode?'轻点水面，投下一点欢喜':'轻点水面，泛起一圈涟漪';
 }
+// Sunrise and sunset move the moon in and out without any other event firing, so the clock checks
+// whether the hint still describes the water.
+let moonUp=false;
+function syncMoonHint(){const up=!!(settings.night&&scene&&scene.look.moon>.05);if(up===moonUp)return;moonUp=up;updatePondHint();}
 // Summer night only: holding still on the pond lights a small lamp that the fireflies drift toward.
 // Scattering food moves to single taps and the 投喂 switch while the lamp is the long press.
 function summonLureAt(x,y){
@@ -640,7 +647,7 @@ function applyWeather(syncBackground=true){updatePondHint();document.body.classL
 function syncShelters(){if(!scene)return;simulation.setShelters(settings.weather==='rain'?scene.shelterPoints():null);}
 function rainLabel(){return settings.rainAmount<.34?'小雨':settings.rainAmount<.67?'中雨':'大雨';}
 function snowLabel(){return settings.snowAmount<.34?'小雪':settings.snowAmount<.67?'中雪':'大雪';}
-function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();const pillTime=$('#pill-time');if(pillTime)pillTime.textContent=$('#clock').textContent;syncAutoNight();}clockTick();const clockTimer=setInterval(clockTick,1000);applyWeather();
+function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();const pillTime=$('#pill-time');if(pillTime)pillTime.textContent=$('#clock').textContent;syncAutoNight();syncMoonHint();}clockTick();const clockTimer=setInterval(clockTick,1000);applyWeather();
 const dialog=$('#panel');
 // The Windows host opens the interactive window straight into a panel the wallpaper's card asked for.
 const requestedPanel=new URLSearchParams(location.search).get('panel');
@@ -858,8 +865,9 @@ function sunStamps(daily,offsetSeconds){
   const rises=(daily?.sunrise||[]).map(toTime).filter(Number.isFinite),sets=(daily?.sunset||[]).map(toTime).filter(Number.isFinite);
   return rises.length&&sets.length?{rise:rises[0],set:sets[0],nextRise:rises[1]??null,label:{rise:(daily?.sunrise?.[0]||'').slice(11,16),set:(daily?.sunset?.[0]||'').slice(11,16)}}:null;
 }
-// The moon's reflection crosses the pond as the night runs. It follows the real sunset → sunrise only
-// while the clock is actually inside that night; manual 月下观鱼 (or daytime) uses the scene's slow drift.
+// The moon's reflection crosses the pond as the night runs. The followed city's sunset → sunrise is
+// handed over while the clock is actually inside that night; otherwise the scene falls back to the
+// system clock's own 18:00 → 06:00, so the moon rises and sets at a fixed pair of nodes either way.
 function moonWindow(){
   if(!sunTimes)return null;
   const now=Date.now(),set=sunTimes.set,rise=sunTimes.rise,next=sunTimes.nextRise;

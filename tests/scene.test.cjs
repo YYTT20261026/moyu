@@ -78,10 +78,9 @@ function pond(seed = 7) {
 }
 const base = { turtles: false, butterflies: false, night: false, rainAmount: .9, snowAmount: .5 };
 
-test('月下观鱼：月亮倒影沿池塘横向移动，真实夜晚按夜程、手动夜晚缓慢往返', () => {
+test('月下观鱼：月亮倒影按系统时钟慢慢横穿，日落入夜升起、天亮隐去', () => {
   const scene = pond();
   const w = 1672, y0 = scene.moonAt[1];
-  scene.look.moon = 1;
   // A real night (sunset → sunrise): the reflection walks east → west, clamped at both banks.
   scene.setNightWindow(1000, 1000 + 12 * 3600e3);
   scene.updateMoonPath(1000); const a = scene.moonAt[0];
@@ -92,13 +91,27 @@ test('月下观鱼：月亮倒影沿池塘横向移动，真实夜晚按夜程�
   assert.equal(scene.moonAt[1], y0, '只横向移动，不漂离原来的倒影高度');
   scene.updateMoonPath(0); assert.ok(Math.abs(scene.moonAt[0] - w * .2) < 1e-6, '日落前停在东岸');
   scene.updateMoonPath(1e12); assert.ok(Math.abs(scene.moonAt[0] - w * .8) < 1e-6, '日出后停在西岸');
-  assert.ok(scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]), '放河灯的位置跟着倒影走');
-  // Manual 月下观鱼 (no sunrise data): a slow 24-minute round trip, easing at the banks.
+  // Without city sun times the system clock still defines one night, 18:00 → 06:00 local.
   scene.setNightWindow(null);
-  scene.updateMoonPath(0); const p = scene.moonAt[0];
-  scene.updateMoonPath(12 * 60 * 1000); const q = scene.moonAt[0];
-  assert.ok(q > p && Math.abs(q - p - w * .6) < 1e-6, '没有夜程时仍横穿整片池塘');
-  assert.ok(scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]));
+  const at = h => new Date(2026, 10, 28, 18, h * 60, 0, 0).getTime();
+  scene.updateMoonPath(at(0)); assert.ok(Math.abs(scene.moonAt[0] - w * .2) < 1e-6, '傍晚月亮从东岸升起');
+  assert.equal(scene.moonFade, 0, '日落入夜那一刻还没露出水面');
+  scene.updateMoonPath(at(.5)); const risen = scene.moonAt[0];
+  assert.ok(risen > w * .2 && risen < w * .25, '半小时后才慢慢离开东岸，不再几分钟绕一圈');
+  assert.equal(scene.moonFade, 1, '入夜二十分钟后完全升起');
+  scene.updateMoonPath(at(6)); assert.ok(Math.abs(scene.moonAt[0] - w * .5) < 1e-6, '午夜正在池塘中间');
+  scene.updateMoonPath(at(11.5)); assert.ok(scene.moonFade > .9 && scene.moonAt[0] > w * .7, '天亮前还在西岸');
+  scene.updateMoonPath(at(12)); assert.equal(scene.moonFade, 0, '日出后月光完全散去');
+  scene.updateMoonPath(at(18)); assert.equal(scene.moonFade, 0, '白天的月亮不在水里');
+  assert.equal(scene.moonAt[1], y0);
+  // A 月下观鱼 switched on by hand keeps its night colours, but the water only lights up while the moon is up.
+  scene.setLook('sunny', true, undefined, {}, 1);
+  assert.equal(scene.look.moon, 0, '白天不画月亮倒影');
+  assert.ok(!scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]), '没有月亮就点不了河灯');
+  scene.updateMoonPath(at(6));
+  scene.setLook('sunny', true, undefined, {}, 1);
+  assert.ok(scene.look.moon > .9, '夜里月亮照亮水面');
+  assert.ok(scene.moonLanternSpot(scene.moonAt[0], scene.moonAt[1]), '放河灯的位置跟着倒影走');
 });
 
 test('每种天气与夜色的画面参数键一致，天气切换可平滑过渡', () => {
