@@ -13,7 +13,13 @@ cd "$ROOT"
 
 echo "▸ Collecting the apps…"
 OUT="$ROOT/build/release"; rm -rf "$OUT"; mkdir -p "$OUT"
-cp "dist/MoYu-$VERSION.dmg" "$OUT/MoYu-$VERSION-macOS.dmg"
+# The dmg is built on a Mac. Publishing from Windows/Linux must not fail without it; upload it
+# later with: gh release upload "v$VERSION" "dist/MoYu-$VERSION.dmg" --repo "$REPO" --clobber
+if [ -f "dist/MoYu-$VERSION.dmg" ]; then
+  cp "dist/MoYu-$VERSION.dmg" "$OUT/MoYu-$VERSION-macOS.dmg"
+else
+  echo "  (no macOS dmg in dist; skipping — build it on a Mac and upload afterwards)"
+fi
 cp "dist/MoYu-Windows-$VERSION.zip" "$OUT/MoYu-$VERSION-Windows.zip"
 cp "dist/MoYu.apk" "$OUT/MoYu-$VERSION-Android.apk"
 cp "dist/MoYu-$VERSION.exe" "$OUT/MoYu-$VERSION.exe"
@@ -24,9 +30,9 @@ echo "▸ Repository $REPO…"
 if ! "$GH" repo view "$REPO" >/dev/null 2>&1; then
   "$GH" repo create "$REPO" --public --description "MoYu · 锦鲤池塘动态壁纸（macOS / Windows / Android / Web）"
 fi
-git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$REPO.git"
 "$GH" auth setup-git
-git push -u origin HEAD:main
+# Push to the repository this release targets, not to a possibly different "origin" (an upstream fork).
+git push "https://github.com/$REPO.git" HEAD:main
 
 echo "▸ Release v$VERSION…"
 NOTES="docs/release-notes-$VERSION.md"
