@@ -1,6 +1,6 @@
 # MoYu v1.2.8
 
-> 本次统一更名为 **MoYu**，全平台（Windows / Android / Web / macOS）均已更新到 1.2.8。macOS 提供通用版（Apple 芯片 + Intel）与 Apple 芯片版。
+> 本次统一更名为 **MoYu**，并把 Windows / Android / Web 全部更新到 1.2.8。macOS 提供通用版（Apple 芯片 + Intel）与 Apple 芯片版。
 
 ## 更名与升级
 
