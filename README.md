@@ -145,7 +145,7 @@ SDK=/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/De
 ARCHS=x86_64 ./scripts/build-macos.sh
 ```
 
-也可以在 GitHub Actions 里手动运行 **macOS universal build**（`macos-15` 是 Intel runner，Xcode 16.4 仍能链接 x86_64），产物会作为 artifact 并自动附加到对应 Release。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
+也可以在 GitHub Actions 里手动运行 **macOS universal build**（`macos-15` runner 的 Xcode 16.4 仍带 x86_64 Swift 运行库，能同时链接两个架构），产物会作为 artifact 并自动附加到对应 Release。应用为临时（ad-hoc）签名，首次在其他 Mac 上打开时需右键 →「打开」。
 
 双击打开后，池塘即铺满每块屏幕的桌面背景层——位于系统壁纸上、桌面图标下，不影响正常使用桌面；多显示器与空间切换均支持。
 

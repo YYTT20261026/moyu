@@ -1,6 +1,6 @@
 name: macOS universal build
 
-# Builds the macOS app on GitHub's Intel runner. The local Mac's macOS 27 SDK no longer ships the
+# Builds the macOS app on GitHub's macOS runner. The local Mac's macOS 27 SDK no longer ships the
 # x86_64 Swift runtime, but the macos-15 image's Xcode 16.4 still does, so both slices can be linked
 # here and lipo'd into a universal .app/.dmg.
 on:
